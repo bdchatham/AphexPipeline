@@ -1,0 +1,16 @@
+# AWS SDK
+boto3>=1.28.0
+
+# YAML parsing
+PyYAML>=6.0
+
+# JSON schema validation
+jsonschema>=4.19.0
+
+# Testing
+pytest>=7.4.0
+hypothesis>=6.88.0
+
+# Type hints
+mypy>=1.5.0
+types-PyYAML>=6.0.0

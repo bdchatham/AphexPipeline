@@ -1,0 +1,37 @@
+version: "1.0"
+
+# Build configuration
+build:
+  commands:
+    - "npm install"
+    - "npm run build"
+    - "npm run package"
+
+# Environment configurations
+environments:
+  - name: dev
+    region: us-east-1
+    account: "123456789012"  # Replace with your AWS account ID
+    stacks:
+      - name: MyAppStack
+        path: lib/my-app-stack.ts
+    tests:
+      commands:
+        - "npm run test:integration"
+
+  - name: staging
+    region: us-west-2
+    account: "123456789012"  # Replace with your AWS account ID
+    stacks:
+      - name: MyAppStack
+        path: lib/my-app-stack.ts
+    tests:
+      commands:
+        - "npm run test:e2e"
+
+  - name: prod
+    region: us-east-1
+    account: "987654321098"  # Replace with your production AWS account ID
+    stacks:
+      - name: MyAppStack
+        path: lib/my-app-stack.ts

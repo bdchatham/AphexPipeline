@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AphexPipeline Configuration",
+  "description": "Configuration schema for AphexPipeline deployment platform",
+  "type": "object",
+  "required": ["version", "build", "environments"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "Configuration schema version"
+    },
+    "build": {
+      "type": "object",
+      "required": ["commands"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Build commands to execute"
+        }
+      }
+    },
+    "environments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "region", "account", "stacks"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Environment name (lowercase alphanumeric and hyphens)"
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[a-z]{2}-[a-z]+-[0-9]$",
+            "description": "AWS region (e.g., us-east-1)"
+          },
+          "account": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$",
+            "description": "AWS account ID (12 digits)"
+          },
+          "stacks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "path"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "CDK stack name"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Path to CDK stack file"
+                }
+              }
+            }
+          },
+          "tests": {
+            "type": "object",
+            "properties": {
+              "commands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Test commands to execute after deployment"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
