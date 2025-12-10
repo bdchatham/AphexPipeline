@@ -6,43 +6,43 @@
   - Set up TypeScript/Python tooling and dependencies
   - _Requirements: 10.1, 11.1_
 
-- [ ] 2. Implement Pipeline CDK Stack for EKS cluster
-- [ ] 2.1 Create EKS cluster construct
+- [x] 2. Implement Pipeline CDK Stack for EKS cluster
+- [x] 2.1 Create EKS cluster construct
   - Define EKS cluster with appropriate node groups
   - Configure VPC and networking for cluster
   - Set up cluster autoscaling
   - _Requirements: 10.1_
 
-- [ ] 2.2 Add Argo Workflows installation via Helm
+- [x] 2.2 Add Argo Workflows installation via Helm
   - Create Helm chart resource for Argo Workflows
   - Configure Argo Workflows namespace and RBAC
   - Set up Argo Workflows UI ingress
   - _Requirements: 10.2_
 
-- [ ] 2.3 Add Argo Events installation via Helm
+- [x] 2.3 Add Argo Events installation via Helm
   - Create Helm chart resource for Argo Events
   - Configure Argo Events namespace and RBAC
   - Set up EventBus and webhook endpoint
   - _Requirements: 10.2_
 
-- [ ] 2.4 Configure IRSA for AWS access
+- [x] 2.4 Configure IRSA for AWS access
   - Create IAM role for workflow execution
   - Set up IRSA trust relationship with EKS
   - Add policies for S3, CloudFormation, IAM access
   - _Requirements: 7.1, 10.3_
 
-- [ ] 2.5 Create S3 bucket for artifacts
+- [x] 2.5 Create S3 bucket for artifacts
   - Define S3 bucket with encryption enabled
   - Enable versioning on bucket
   - Set up lifecycle policies for artifact cleanup
   - _Requirements: 7.4_
 
-- [ ] 2.6 Add CDK Stack outputs
+- [x] 2.6 Add CDK Stack outputs
   - Output cluster name, Argo URLs, S3 bucket name
   - Output IAM role ARNs for reference
   - _Requirements: 10.5_
 
-- [ ] 2.7 Write unit tests for Pipeline CDK Stack
+- [x] 2.7 Write unit tests for Pipeline CDK Stack
   - Test EKS cluster configuration
   - Test IAM role policies
   - Test S3 bucket encryption and versioning
