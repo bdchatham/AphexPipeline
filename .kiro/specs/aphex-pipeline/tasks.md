@@ -48,46 +48,46 @@
   - Test S3 bucket encryption and versioning
   - _Requirements: 10.1-10.5_
 
-- [ ] 3. Create configuration schema and validation
-- [ ] 3.1 Define JSON schema for aphex-config.yaml
+- [x] 3. Create configuration schema and validation
+- [x] 3.1 Define JSON schema for aphex-config.yaml
   - Specify required fields (version, build, environments)
   - Define environment schema (name, region, account, stacks)
   - Add optional fields (tests, hooks)
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 3.2 Implement configuration parser
+- [x] 3.2 Implement configuration parser
   - Parse YAML configuration file
   - Validate against JSON schema
   - Return structured AphexConfig object
   - _Requirements: 4.1, 9.1_
 
-- [ ] 3.3 Write property test for configuration validation
+- [x] 3.3 Write property test for configuration validation
   - **Property 19: Configuration schema validation**
   - **Validates: Requirements 9.1**
 
-- [ ] 3.4 Write property test for environment schema compliance
+- [x] 3.4 Write property test for environment schema compliance
   - **Property 8: Environment configuration schema compliance**
   - **Validates: Requirements 4.2**
 
-- [ ] 3.5 Write property test for credential absence
+- [x] 3.5 Write property test for credential absence
   - **Property 15: Credential absence in configuration**
   - **Validates: Requirements 7.5**
 
-- [ ] 4. Implement Argo Events configuration
-- [ ] 4.1 Create EventSource for GitHub webhooks
+- [x] 4. Implement Argo Events configuration
+- [x] 4.1 Create EventSource for GitHub webhooks
   - Define GitHub EventSource YAML
   - Configure webhook endpoint and authentication
   - Specify events to listen for (push, pull_request)
   - _Requirements: 1.1, 1.2_
 
-- [ ] 4.2 Create Sensor for workflow triggering
+- [x] 4.2 Create Sensor for workflow triggering
   - Define Sensor YAML with event filters
   - Filter for main branch pushes
   - Configure workflow creation trigger
   - Pass commit SHA, branch, repo URL to workflow
   - _Requirements: 1.1, 1.2, 1.3_
 
-- [ ] 4.3 Write property test for git commit extraction
+- [x] 4.3 Write property test for git commit extraction
   - **Property 1: Git commit extraction**
   - **Validates: Requirements 1.3**
 

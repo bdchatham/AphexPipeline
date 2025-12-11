@@ -1,0 +1,50 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github
+  namespace: argo-events
+spec:
+  github:
+    aphex-pipeline:
+      # Repository configuration - update with your organization and repository
+      repositories:
+        - owner: <your-org>
+          names:
+            - <your-repo>
+      
+      # Webhook endpoint configuration
+      webhook:
+        endpoint: /push
+        port: "12000"
+        method: POST
+      
+      # GitHub events to listen for
+      events:
+        - push
+        - pull_request
+      
+      # GitHub API token for authentication
+      # This should be created as a Kubernetes secret:
+      # kubectl create secret generic github-access \
+      #   --from-literal=token=<your-github-token> \
+      #   -n argo-events
+      apiToken:
+        name: github-access
+        key: token
+      
+      # Webhook secret for validating GitHub webhook signatures (optional but recommended)
+      # kubectl create secret generic github-webhook-secret \
+      #   --from-literal=secret=<your-webhook-secret> \
+      #   -n argo-events
+      webhookSecret:
+        name: github-webhook-secret
+        key: secret
+      
+      # Enable insecure mode for development (disable in production)
+      insecure: false
+      
+      # Active mode - webhook will be registered with GitHub automatically
+      active: true
+      
+      # Content type for webhook
+      contentType: json
