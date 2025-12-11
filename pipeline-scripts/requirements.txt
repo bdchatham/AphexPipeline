@@ -10,6 +10,7 @@ jsonschema>=4.19.0
 # Testing
 pytest>=7.4.0
 hypothesis>=6.88.0
+moto>=4.2.0
 
 # Type hints
 mypy>=1.5.0

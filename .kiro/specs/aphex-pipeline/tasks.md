@@ -131,40 +131,40 @@
   - Handle errors from kubectl
   - _Requirements: 3.6_
 
-- [ ] 7. Implement build stage logic
-- [ ] 7.1 Create build stage script
+- [x] 7. Implement build stage logic
+- [x] 7.1 Create build stage script
   - Clone repository at specific commit SHA
   - Execute user-defined build commands
   - Package artifacts
   - _Requirements: 1.5, 2.1, 2.2_
 
-- [ ] 7.2 Write property test for repository cloning
+- [x] 7.2 Write property test for repository cloning
   - **Property 2: Repository cloning at specific commit**
   - **Validates: Requirements 1.5**
 
-- [ ] 7.3 Write property test for build command execution
+- [x] 7.3 Write property test for build command execution
   - **Property 3: Build command execution**
   - **Validates: Requirements 2.2**
 
-- [ ] 7.4 Implement artifact tagging
+- [x] 7.4 Implement artifact tagging
   - Tag artifacts with commit SHA
   - Add timestamp to artifact metadata
   - _Requirements: 2.3_
 
-- [ ] 7.5 Write property test for artifact tagging
+- [x] 7.5 Write property test for artifact tagging
   - **Property 4: Artifact tagging**
   - **Validates: Requirements 2.3**
 
-- [ ] 7.6 Implement S3 artifact upload
+- [x] 7.6 Implement S3 artifact upload
   - Upload artifacts to S3 bucket
   - Use commit SHA in S3 path
   - _Requirements: 2.4_
 
-- [ ] 7.7 Write property test for artifact storage and retrieval
+- [x] 7.7 Write property test for artifact storage and retrieval
   - **Property 5: Artifact storage and retrieval**
   - **Validates: Requirements 2.4**
 
-- [ ] 7.8 Add error handling for build failures
+- [x] 7.8 Add error handling for build failures
   - Capture stderr and stdout
   - Store error logs in S3
   - Fail workflow on build error
