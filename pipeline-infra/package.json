@@ -1,27 +1,55 @@
 {
-  "name": "aphex-pipeline-infra",
+  "name": "@bdchatham/aphex-pipeline",
   "version": "1.0.0",
-  "description": "AphexPipeline CDK Infrastructure",
-  "main": "lib/index.js",
+  "description": "Self-modifying CDK deployment platform built on EKS, Argo Workflows, and Argo Events",
+  "main": "dist/lib/index.js",
+  "types": "dist/lib/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-templates",
+    "copy-templates": "mkdir -p dist/.argo && cp -r ../.argo/*.yaml dist/.argo/ && cp ../aphex-config.schema.json dist/",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "cdk",
     "aws",
     "pipeline",
-    "argo"
+    "argo",
+    "argo-workflows",
+    "argo-events",
+    "eks",
+    "ci-cd",
+    "deployment",
+    "infrastructure"
   ],
-  "author": "",
+  "author": "Brandon Chatham",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bdchatham/aphex-pipeline.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bdchatham/aphex-pipeline/issues"
+  },
+  "homepage": "https://github.com/bdchatham/aphex-pipeline#readme",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.100.0",
+    "constructs": "^10.0.0"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/js-yaml": "^4.0.5",
     "@types/node": "^20.0.0",
     "aws-cdk": "^2.100.0",
+    "aws-cdk-lib": "^2.100.0",
+    "constructs": "^10.0.0",
     "fast-check": "^4.4.0",
     "jest": "^29.5.0",
     "ts-jest": "^29.1.0",
@@ -29,8 +57,6 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.100.0",
-    "constructs": "^10.0.0",
     "js-yaml": "^4.1.0"
   }
 }

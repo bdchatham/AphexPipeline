@@ -1,0 +1,30 @@
+# Source files (we publish compiled JS)
+lib/**/*.ts
+bin/**/*.ts
+!lib/**/*.d.ts
+!bin/**/*.d.ts
+
+# Tests
+test/
+dist/test/
+*.test.ts
+*.test.js
+*.test.d.ts
+
+# Build artifacts
+cdk.out/
+.cdk.staging/
+
+# Development files
+tsconfig.json
+jest.config.js
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.log
+.DS_Store
+node_modules/

@@ -71,7 +71,82 @@ AphexPipeline is a generic, reusable CI/CD platform that provides automated infr
 - **kubectl**: For EKS cluster management
 - **GitHub Repository**: With admin access for webhook configuration
 
-## Quick Start
+## Using as a Library
+
+AphexPipeline is designed to be imported into your own CDK project as a reusable construct.
+
+### Quick Start
+
+1. **Install the package**:
+   ```bash
+   npm install @bdchatham/aphex-pipeline
+   ```
+
+2. **Create a GitHub token secret in AWS Secrets Manager**:
+   ```bash
+   aws secretsmanager create-secret \
+     --name github-token \
+     --secret-string '{"token":"ghp_your_token_here"}'
+   ```
+
+3. **Import and use in your CDK app**:
+   ```typescript
+   import { AphexPipelineStack } from 'aphex-pipeline';
+   
+   new AphexPipelineStack(app, 'MyPipeline', {
+     env: { account: '123456789012', region: 'us-east-1' },
+     
+     // Required: GitHub configuration
+     githubOwner: 'my-org',
+     githubRepo: 'my-repo',
+     githubTokenSecretName: 'github-token',
+     
+     // Optional: customize as needed
+     githubBranch: 'main',
+     clusterName: 'my-pipeline',
+     minNodes: 3,
+     maxNodes: 20,
+   });
+   ```
+
+4. **Deploy**:
+   ```bash
+   cdk deploy MyPipeline
+   ```
+
+5. **Configure GitHub webhook** using the URL from stack outputs
+
+That's it! The construct handles everything:
+- Creates EKS cluster with Argo Workflows and Argo Events
+- Configures GitHub EventSource and Sensor
+- Sets up logging and monitoring
+- Creates IAM roles and S3 buckets
+- Deploys all Kubernetes manifests
+
+See the [Library Usage Guide](.kiro/docs/library-usage.md) for detailed instructions on:
+
+- Installation options (NPM, git submodule, local path)
+- Advanced configuration and customization
+- Using with existing VPC or EKS cluster
+- Custom container images and templates
+- Extending the stack with custom resources
+- Managing multiple pipelines
+- Testing your integration
+
+**Quick example**:
+
+```typescript
+import { AphexPipelineStack } from 'aphex-pipeline';
+
+new AphexPipelineStack(app, 'MyPipeline', {
+  env: { account: '123456789012', region: 'us-east-1' },
+  githubOwner: 'bdchatham',
+  githubRepo: 'my-repo',
+  githubTokenSecretName: 'github-token',
+});
+```
+
+## Quick Start (Standalone Deployment)
 
 ### 1. Install Dependencies
 
@@ -339,6 +414,9 @@ AphexPipeline consists of:
 See [Architecture Documentation](.kiro/docs/architecture.md) for detailed diagrams and component descriptions.
 
 ## Documentation
+
+### Library Usage
+- [Library Usage Guide](.kiro/docs/library-usage.md) - How to import and use AphexPipeline in your CDK project
 
 ### Specifications
 - [Requirements](.kiro/specs/aphex-pipeline/requirements.md) - Feature requirements and acceptance criteria

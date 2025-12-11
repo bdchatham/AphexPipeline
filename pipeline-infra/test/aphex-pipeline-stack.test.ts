@@ -14,6 +14,11 @@ describe('AphexPipelineStack', () => {
         account: '123456789012',
         region: 'us-east-1',
       },
+      // Required parameters for testing
+      githubOwner: 'test-org',
+      githubRepo: 'test-repo',
+      githubTokenSecretName: 'test-github-token',
+      // Optional: use defaults for other parameters
     });
     template = Template.fromStack(stack);
   });

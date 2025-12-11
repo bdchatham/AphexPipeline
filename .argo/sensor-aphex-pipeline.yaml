@@ -1,21 +1,21 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Sensor
 metadata:
-  name: aphex-pipeline-sensor
-  namespace: argo-events
+  name: ${SENSOR_NAME}
+  namespace: ${ARGO_EVENTS_NAMESPACE}
 spec:
   # Define dependencies - events that this sensor listens for
   dependencies:
     - name: github-push
-      eventSourceName: github
+      eventSourceName: ${EVENT_SOURCE_NAME}
       eventName: aphex-pipeline
       filters:
         data:
-          # Filter for pushes to main branch only
+          # Filter for pushes to specified branch
           - path: body.ref
             type: string
             value:
-              - "refs/heads/main"
+              - "${GITHUB_BRANCH_REF}"
   
   # Define triggers - actions to take when dependencies are satisfied
   triggers:
@@ -28,12 +28,12 @@ spec:
               apiVersion: argoproj.io/v1alpha1
               kind: Workflow
               metadata:
-                generateName: aphex-pipeline-
-                namespace: argo
+                generateName: ${WORKFLOW_NAME_PREFIX}
+                namespace: ${ARGO_NAMESPACE}
               spec:
                 # Reference to the WorkflowTemplate that defines the pipeline topology
                 workflowTemplateRef:
-                  name: aphex-pipeline-template
+                  name: ${WORKFLOW_TEMPLATE_NAME}
                 
                 # Arguments passed to the workflow from the GitHub event
                 arguments:
