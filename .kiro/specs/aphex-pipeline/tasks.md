@@ -319,20 +319,20 @@
   - Configure log retention
   - _Requirements: 8.1_
 
-- [-] 13. Implement validation logic
-- [ ] 13.1 Write property test for AWS credential validation
+- [x] 13. Implement validation logic
+- [x] 13.1 Write property test for AWS credential validation
   - **Property 20: AWS credential validation**
   - **Validates: Requirements 9.3**
 
-- [ ] 13.2 Write property test for CDK context validation
+- [x] 13.2 Write property test for CDK context validation
   - **Property 21: CDK context validation**
   - **Validates: Requirements 9.4**
 
-- [ ] 13.3 Write property test for build tool validation
+- [x] 13.3 Write property test for build tool validation
   - **Property 22: Build tool validation**
   - **Validates: Requirements 9.5**
 
-- [ ] 13.4 Add validation to workflow start
+- [x] 13.4 Add validation to workflow start
   - Validate configuration schema
   - Validate AWS credentials
   - Validate CDK context
@@ -340,98 +340,25 @@
   - Fail fast if validation fails
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
 
-- [ ] 14. Create bootstrap script and documentation
-- [ ] 14.1 Create bootstrap script
-  - Script to deploy Pipeline CDK Stack
-  - Script to configure kubectl
-  - Script to apply initial WorkflowTemplate
-  - _Requirements: 11.1, 11.2_
-
-- [ ] 14.2 Add GitHub webhook configuration helper
-  - Script or instructions to configure webhook
-  - Include webhook URL from CDK outputs
-  - _Requirements: 11.4_
-
-- [ ] 14.3 Write bootstrap documentation
-  - Prerequisites and setup steps
-  - Step-by-step bootstrap instructions
-  - Verification steps
-  - _Requirements: 11.5_
-
-- [ ] 14.4 Create example aphex-config.yaml
-  - Example with single environment
-  - Example with multiple environments
-  - Comments explaining each field
-  - _Requirements: 4.1_
-
-- [ ] 15. Create initial WorkflowTemplate
-- [ ] 15.1 Write initial WorkflowTemplate YAML
-  - Define build stage
-  - Define pipeline deployment stage
-  - Define single dev environment stage
-  - _Requirements: 11.3_
-
-- [ ] 15.2 Test WorkflowTemplate manually
-  - Apply to test cluster
-  - Trigger workflow manually
-  - Verify stages execute correctly
-  - _Requirements: 11.3_
-
-- [ ] 16. Integration testing
-- [ ] 16.1 Set up test environment
-  - Deploy test instance of AphexPipeline
-  - Create test GitHub repository
-  - Configure test webhook
-  - _Requirements: All_
-
-- [ ] 16.2 Test full pipeline execution
-  - Trigger workflow with test commit
-  - Verify build stage completes
-  - Verify pipeline deployment stage completes
-  - Verify environment stage completes
-  - _Requirements: 1.1, 2.1, 3.1, 5.1_
-
-- [ ] 16.3 Test self-modification
-  - Add new environment to config
-  - Trigger workflow
-  - Verify new environment stage appears in next run
-  - _Requirements: 3.7, 4.5_
-
-- [ ] 16.4 Test error handling
-  - Trigger workflow with failing build
-  - Verify workflow halts and sends notification
-  - Trigger workflow with failing CDK deployment
-  - Verify workflow halts appropriately
-  - _Requirements: 2.5, 5.4, 6.2_
-
-- [ ] 16.5 Clean up test resources
-  - Delete test workflows
-  - Delete test artifacts from S3
-  - Optionally tear down test pipeline
-  - _Requirements: All_
-
-- [ ] 17. Documentation and final polish
-- [ ] 17.1 Write operational documentation
+- [x] 17. Documentation and final polish
+- [x] 17.1 Write operational documentation
   - Monitoring guide
   - Troubleshooting guide
   - Maintenance procedures
   - _Requirements: All_
 
-- [ ] 17.2 Create architecture diagrams
+- [x] 17.2 Create architecture diagrams
   - Update .kiro/docs/architecture.md
   - Include Mermaid diagrams
   - _Requirements: All_
 
-- [ ] 17.3 Write README
+- [x] 17.3 Write README
   - Overview of AphexPipeline
   - Quick start guide
   - Link to detailed documentation
   - _Requirements: All_
 
-- [ ] 17.4 Add example use case
+- [x] 17.4 Add example use case
   - Example project using AphexPipeline
   - Show how to configure for different scenarios
   - _Requirements: 13.1-13.5_
-
-- [ ] 18. Checkpoint - Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
