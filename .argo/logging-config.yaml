@@ -1,0 +1,131 @@
+---
+# Argo Workflows Logging Configuration
+#
+# This ConfigMap configures logging settings for Argo Workflows to ensure
+# all stage outputs are captured and retained according to requirements.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflow-controller-configmap
+  namespace: argo
+data:
+  # Archive logs to S3 for long-term retention
+  # This ensures all workflow logs are preserved beyond the pod lifecycle
+  archiveLogs: "true"
+  
+  # Configure artifact repository for log archival
+  # Logs will be stored in the same S3 bucket as build artifacts
+  artifactRepository: |
+    archiveLogs: true
+    s3:
+      bucket: ${ARTIFACT_BUCKET}
+      keyFormat: "logs/{{workflow.name}}/{{pod.name}}"
+      endpoint: s3.amazonaws.com
+      insecure: false
+      # Use IRSA for authentication (no access keys needed)
+      useSDKCreds: true
+  
+  # Workflow retention policy
+  # Keep completed workflows for 30 days, failed workflows for 90 days
+  retentionPolicy: |
+    completed: 30d
+    failed: 90d
+    errored: 90d
+  
+  # Enable workflow metrics for monitoring
+  metricsConfig: |
+    enabled: true
+    path: /metrics
+    port: 9090
+  
+  # Configure workflow defaults
+  workflowDefaults: |
+    spec:
+      # Ensure all pods have service account for IRSA
+      serviceAccountName: argo-workflow
+      
+      # Set pod garbage collection to retain pods for debugging
+      podGC:
+        strategy: OnWorkflowCompletion
+        deleteDelayDuration: 24h
+      
+      # Archive all logs to S3
+      archiveLogs: true
+      
+      # Set resource limits for workflow pods
+      podSpecPatch: |
+        containers:
+          - name: main
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+
+---
+# RBAC for Argo Workflows to access S3 for log archival
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo-workflow
+  namespace: argo
+  annotations:
+    # This annotation links the service account to the IAM role via IRSA
+    # The IAM role ARN should be set during CDK deployment
+    eks.amazonaws.com/role-arn: ${WORKFLOW_EXECUTION_ROLE_ARN}
+
+---
+# Role for workflow pods to create and manage workflows
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argo-workflow-role
+  namespace: argo
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - workflows
+      - workflowtemplates
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argo-workflow-binding
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argo-workflow-role
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow
+    namespace: argo

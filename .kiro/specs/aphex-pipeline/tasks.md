@@ -269,52 +269,52 @@
   - Store test failure details
   - _Requirements: 6.2_
 
-- [ ] 11. Implement cross-account IAM role assumption
-- [ ] 11.1 Add cross-account role assumption logic
+- [x] 11. Implement cross-account IAM role assumption
+- [x] 11.1 Add cross-account role assumption logic
   - Detect when deploying to different account
   - Assume configured cross-account role
   - Use assumed role credentials for deployment
   - _Requirements: 7.2_
 
-- [ ] 11.2 Write property test for cross-account role assumption
+- [x] 11.2 Write property test for cross-account role assumption
   - **Property 14: Cross-account role assumption**
   - **Validates: Requirements 7.2**
 
-- [ ] 11.3 Add IAM policy for cross-account access
+- [x] 11.3 Add IAM policy for cross-account access
   - Update workflow execution role
   - Add sts:AssumeRole permission
   - _Requirements: 7.2_
 
-- [ ] 12. Implement monitoring and logging
-- [ ] 12.1 Add workflow metadata recording
+- [x] 12. Implement monitoring and logging
+- [x] 12.1 Add workflow metadata recording
   - Record workflow ID, commit SHA, timestamps
   - Store metadata in DynamoDB or S3
   - _Requirements: 8.2_
 
-- [ ] 12.2 Write property test for workflow metadata recording
+- [x] 12.2 Write property test for workflow metadata recording
   - **Property 16: Workflow metadata recording**
   - **Validates: Requirements 8.2**
 
-- [ ] 12.3 Implement CloudWatch metrics emission
+- [x] 12.3 Implement CloudWatch metrics emission
   - Emit metrics for deployment success/failure
   - Emit metrics for workflow duration
   - _Requirements: 8.3_
 
-- [ ] 12.4 Write property test for deployment metrics emission
+- [x] 12.4 Write property test for deployment metrics emission
   - **Property 17: Deployment metrics emission**
   - **Validates: Requirements 8.3**
 
-- [ ] 12.5 Add notification logic
+- [x] 12.5 Add notification logic
   - Send alerts on workflow completion/failure
   - Include workflow status and Argo UI link
   - Support multiple notification channels (Slack, email)
   - _Requirements: 8.5_
 
-- [ ] 12.6 Write property test for notification delivery
+- [x] 12.6 Write property test for notification delivery
   - **Property 18: Notification delivery**
   - **Validates: Requirements 8.5**
 
-- [ ] 12.7 Configure Argo Workflows logging
+- [x] 12.7 Configure Argo Workflows logging
   - Ensure all stage outputs logged to Argo UI
   - Configure log retention
   - _Requirements: 8.1_

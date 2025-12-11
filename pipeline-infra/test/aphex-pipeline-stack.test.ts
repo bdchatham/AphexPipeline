@@ -85,10 +85,20 @@ describe('AphexPipelineStack', () => {
         PolicyDocument: {
           Statement: Match.arrayWith([
             Match.objectLike({
-              Action: Match.arrayWith([
-                'cloudformation:*',
-                'sts:AssumeRole',
-              ]),
+              Action: 'cloudformation:*',
+              Effect: 'Allow',
+            }),
+          ]),
+        },
+      });
+    });
+
+    test('IAM role has cross-account role assumption policy', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: ['sts:AssumeRole', 'sts:GetCallerIdentity'],
               Effect: 'Allow',
             }),
           ]),

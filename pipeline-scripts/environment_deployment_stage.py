@@ -23,6 +23,77 @@ from botocore.exceptions import ClientError
 from config_parser import StackConfig, EnvironmentConfig
 
 
+def get_current_account_id() -> str:
+    """
+    Get the current AWS account ID.
+    
+    Returns:
+        Current AWS account ID
+        
+    Raises:
+        EnvironmentDeploymentError: If unable to get account ID
+    """
+    try:
+        sts_client = boto3.client('sts')
+        response = sts_client.get_caller_identity()
+        return response['Account']
+    except Exception as e:
+        raise EnvironmentDeploymentError(f"Failed to get current account ID: {str(e)}") from e
+
+
+def assume_cross_account_role(
+    target_account: str,
+    role_name: str = "AphexPipelineCrossAccountRole",
+    session_name: str = "AphexPipelineSession"
+) -> Dict[str, str]:
+    """
+    Assume a cross-account IAM role and return temporary credentials.
+    
+    Args:
+        target_account: Target AWS account ID
+        role_name: Name of the role to assume in the target account
+        session_name: Session name for the assumed role
+        
+    Returns:
+        Dictionary with AWS credentials (AccessKeyId, SecretAccessKey, SessionToken)
+        
+    Raises:
+        EnvironmentDeploymentError: If role assumption fails
+    """
+    try:
+        role_arn = f"arn:aws:iam::{target_account}:role/{role_name}"
+        
+        print(f"Assuming cross-account role: {role_arn}")
+        
+        sts_client = boto3.client('sts')
+        response = sts_client.assume_role(
+            RoleArn=role_arn,
+            RoleSessionName=session_name
+        )
+        
+        credentials = response['Credentials']
+        
+        print(f"Successfully assumed role in account {target_account}")
+        
+        return {
+            'AccessKeyId': credentials['AccessKeyId'],
+            'SecretAccessKey': credentials['SecretAccessKey'],
+            'SessionToken': credentials['SessionToken']
+        }
+        
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '')
+        error_msg = e.response.get('Error', {}).get('Message', '')
+        
+        raise EnvironmentDeploymentError(
+            f"Failed to assume cross-account role {role_arn}: {error_code} - {error_msg}"
+        ) from e
+    except Exception as e:
+        raise EnvironmentDeploymentError(
+            f"Failed to assume cross-account role: {str(e)}"
+        ) from e
+
+
 class EnvironmentDeploymentError(Exception):
     """Exception raised when environment deployment stage fails."""
     pass
@@ -67,7 +138,8 @@ class EnvironmentDeploymentStage:
         environment: EnvironmentConfig,
         artifact_path: Optional[str] = None,
         workspace_dir: str = "/workspace",
-        artifacts_dir: str = "/workspace/artifacts"
+        artifacts_dir: str = "/workspace/artifacts",
+        cross_account_role_name: str = "AphexPipelineCrossAccountRole"
     ):
         """
         Initialize the environment deployment stage.
@@ -79,6 +151,7 @@ class EnvironmentDeploymentStage:
             artifact_path: S3 path to artifacts (e.g., s3://bucket/commit-sha/)
             workspace_dir: Directory to clone repository into
             artifacts_dir: Directory to download artifacts to
+            cross_account_role_name: Name of the cross-account role to assume
         """
         self.repo_url = repo_url
         self.commit_sha = commit_sha
@@ -86,7 +159,10 @@ class EnvironmentDeploymentStage:
         self.artifact_path = artifact_path
         self.workspace_dir = Path(workspace_dir)
         self.artifacts_dir = Path(artifacts_dir)
+        self.cross_account_role_name = cross_account_role_name
         self.stack_results: List[StackDeploymentResult] = []
+        self.current_account_id: Optional[str] = None
+        self.assumed_credentials: Optional[Dict[str, str]] = None
         
     def clone_repository(self) -> None:
         """
@@ -220,13 +296,60 @@ class EnvironmentDeploymentStage:
             print(error_msg, file=sys.stderr)
             raise EnvironmentDeploymentError(error_msg) from e
     
+    def detect_and_assume_cross_account_role(self) -> None:
+        """
+        Detect if deploying to a different AWS account and assume cross-account role if needed.
+        
+        This method:
+        1. Gets the current AWS account ID
+        2. Compares it with the target environment account
+        3. If different, assumes the configured cross-account role
+        4. Sets AWS credentials environment variables for the assumed role
+        
+        Raises:
+            EnvironmentDeploymentError: If cross-account role assumption fails
+        """
+        try:
+            # Get current account ID
+            self.current_account_id = get_current_account_id()
+            print(f"Current AWS account: {self.current_account_id}")
+            print(f"Target AWS account: {self.environment.account}")
+            
+            # Check if we need to assume a cross-account role
+            if self.current_account_id != self.environment.account:
+                print(f"\nCross-account deployment detected!")
+                print(f"Assuming role in target account {self.environment.account}...")
+                
+                # Assume the cross-account role
+                self.assumed_credentials = assume_cross_account_role(
+                    target_account=self.environment.account,
+                    role_name=self.cross_account_role_name,
+                    session_name=f"AphexPipeline-{self.environment.name}"
+                )
+                
+                # Set AWS credentials environment variables
+                os.environ['AWS_ACCESS_KEY_ID'] = self.assumed_credentials['AccessKeyId']
+                os.environ['AWS_SECRET_ACCESS_KEY'] = self.assumed_credentials['SecretAccessKey']
+                os.environ['AWS_SESSION_TOKEN'] = self.assumed_credentials['SessionToken']
+                
+                print(f"Successfully configured credentials for account {self.environment.account}")
+            else:
+                print(f"Same-account deployment - no role assumption needed")
+                
+        except EnvironmentDeploymentError:
+            raise
+        except Exception as e:
+            error_msg = f"Failed to detect or assume cross-account role: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            raise EnvironmentDeploymentError(error_msg) from e
+    
     def set_aws_context(self) -> None:
         """
         Set AWS region and account context for deployment.
         
         This sets environment variables that CDK will use.
         """
-        print(f"Setting AWS context:")
+        print(f"\nSetting AWS context:")
         print(f"  Region: {self.environment.region}")
         print(f"  Account: {self.environment.account}")
         
@@ -332,6 +455,10 @@ class EnvironmentDeploymentStage:
         """
         Deploy a single Application CDK Stack.
         
+        This method supports two cross-account deployment strategies:
+        1. CDK Native: Uses CDK bootstrap roles with --role-arn (recommended)
+        2. Custom: Uses assumed role credentials via environment variables
+        
         Args:
             stack: Stack configuration
             
@@ -349,10 +476,22 @@ class EnvironmentDeploymentStage:
             if stack.path and stack.path != ".":
                 cdk_app_dir = self.workspace_dir / stack.path
             
+            # Build CDK deploy command
+            cdk_command = ["npx", "cdk", "deploy", stack.name, "--require-approval", "never"]
+            
+            # If cross-account deployment with assumed credentials, use CDK's native role assumption
+            # This aligns with CDK bootstrap pattern
+            if self.assumed_credentials:
+                # Use CDK's deployment role from bootstrap
+                # Format: cdk-hnb659fds-deploy-role-{account}-{region}
+                deploy_role_arn = f"arn:aws:iam::{self.environment.account}:role/cdk-hnb659fds-deploy-role-{self.environment.account}-{self.environment.region}"
+                cdk_command.extend(["--role-arn", deploy_role_arn])
+                print(f"Using CDK bootstrap deployment role: {deploy_role_arn}")
+            
             # Deploy the stack
             print(f"Running CDK deploy for {stack.name}...")
             result = subprocess.run(
-                ["npx", "cdk", "deploy", stack.name, "--require-approval", "never"],
+                cdk_command,
                 cwd=str(cdk_app_dir),
                 capture_output=True,
                 text=True,
@@ -630,16 +769,19 @@ class EnvironmentDeploymentStage:
             if self.artifact_path:
                 self.download_artifacts_from_s3()
             
-            # Step 3: Set AWS region and account context
+            # Step 3: Detect cross-account deployment and assume role if needed
+            self.detect_and_assume_cross_account_role()
+            
+            # Step 4: Set AWS region and account context
             self.set_aws_context()
             
-            # Step 4: Synthesize all Application CDK Stacks just-in-time
+            # Step 5: Synthesize all Application CDK Stacks just-in-time
             self.synthesize_all_stacks()
             
-            # Step 5: Deploy stacks in configured order
+            # Step 6: Deploy stacks in configured order
             self.stack_results = self.deploy_stacks_in_order()
             
-            # Step 6: Save outputs to file
+            # Step 7: Save outputs to file
             self.save_outputs_to_file()
             
             print(f"\n{'='*80}")

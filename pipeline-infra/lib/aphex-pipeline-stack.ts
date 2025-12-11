@@ -188,13 +188,25 @@ export class AphexPipelineStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: [
           'cloudformation:*',
-          'sts:AssumeRole',
         ],
         resources: ['*'],
       })
     );
 
-    // IAM access for cross-account role assumption
+    // Cross-account IAM role assumption for deploying to different AWS accounts
+    // This allows the workflow to assume roles in target accounts for cross-account deployments
+    workflowServiceAccount.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'sts:AssumeRole',
+          'sts:GetCallerIdentity',
+        ],
+        resources: ['*'], // Allows assuming any role - can be restricted to specific role ARN patterns
+      })
+    );
+
+    // IAM access for role management
     workflowServiceAccount.addToPrincipalPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,

@@ -10,14 +10,18 @@ import tempfile
 import shutil
 import subprocess
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 from hypothesis import given, strategies as st, settings, assume
 from environment_deployment_stage import (
     EnvironmentDeploymentStage,
     EnvironmentDeploymentError,
     StackOutput,
     StackDeploymentResult,
-    EnvironmentDeploymentResult
+    EnvironmentDeploymentResult,
+    get_current_account_id,
+    assume_cross_account_role
 )
 from config_parser import StackConfig, EnvironmentConfig
 
@@ -727,3 +731,258 @@ def test_property_24_stage_output_propagation_multiple_stages():
     assert all_outputs["Stack1.Output1"] == "Value1"
     assert all_outputs["Stack2.Output2"] == "Value2"
     assert all_outputs["Stack3.Output3"] == "Value3"
+
+
+
+# Feature: aphex-pipeline, Property 14: Cross-account role assumption
+@settings(max_examples=100)
+@given(
+    current_account=st.text(alphabet='0123456789', min_size=12, max_size=12),
+    target_account=st.text(alphabet='0123456789', min_size=12, max_size=12),
+    commit_sha=valid_commit_sha()
+)
+def test_property_14_cross_account_role_assumption(current_account, target_account, commit_sha):
+    """
+    Property 14: Cross-account role assumption
+    
+    For any deployment to an AWS account different from the pipeline account,
+    the correct cross-account IAM role should be assumed.
+    
+    Validates: Requirements 7.2
+    """
+    # Ensure we have different accounts for cross-account scenario
+    assume(current_account != target_account)
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workspace = Path(temp_dir) / "workspace"
+        artifacts = Path(temp_dir) / "artifacts"
+        
+        environment = EnvironmentConfig(
+            name="test-env",
+            region="us-east-1",
+            account=target_account,
+            stacks=[StackConfig(name="TestStack", path=".")],
+            tests=None
+        )
+        
+        stage = EnvironmentDeploymentStage(
+            repo_url="https://github.com/test/repo.git",
+            commit_sha=commit_sha,
+            environment=environment,
+            workspace_dir=str(workspace),
+            artifacts_dir=str(artifacts),
+            cross_account_role_name="TestCrossAccountRole"
+        )
+        
+        # Mock the AWS API calls
+        mock_credentials = {
+            'AccessKeyId': 'AKIAIOSFODNN7EXAMPLE',
+            'SecretAccessKey': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+            'SessionToken': 'FwoGZXIvYXdzEBYaDH...'
+        }
+        
+        with patch('environment_deployment_stage.get_current_account_id', return_value=current_account):
+            with patch('environment_deployment_stage.assume_cross_account_role', return_value=mock_credentials):
+                # Call the cross-account detection method
+                stage.detect_and_assume_cross_account_role()
+                
+                # Verify that the current account was detected
+                assert stage.current_account_id == current_account
+                
+                # Verify that credentials were assumed (since accounts are different)
+                assert stage.assumed_credentials is not None
+                assert stage.assumed_credentials == mock_credentials
+                
+                # Verify that AWS credentials environment variables were set
+                assert os.environ.get('AWS_ACCESS_KEY_ID') == mock_credentials['AccessKeyId']
+                assert os.environ.get('AWS_SECRET_ACCESS_KEY') == mock_credentials['SecretAccessKey']
+                assert os.environ.get('AWS_SESSION_TOKEN') == mock_credentials['SessionToken']
+
+
+# Feature: aphex-pipeline, Property 14: Cross-account role assumption (same account)
+@settings(max_examples=100)
+@given(
+    account=st.text(alphabet='0123456789', min_size=12, max_size=12),
+    commit_sha=valid_commit_sha()
+)
+def test_property_14_cross_account_role_assumption_same_account(account, commit_sha):
+    """
+    Property 14: Cross-account role assumption (same account)
+    
+    For any deployment to the same AWS account as the pipeline account,
+    no cross-account role should be assumed.
+    
+    Validates: Requirements 7.2
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workspace = Path(temp_dir) / "workspace"
+        artifacts = Path(temp_dir) / "artifacts"
+        
+        environment = EnvironmentConfig(
+            name="test-env",
+            region="us-east-1",
+            account=account,
+            stacks=[StackConfig(name="TestStack", path=".")],
+            tests=None
+        )
+        
+        stage = EnvironmentDeploymentStage(
+            repo_url="https://github.com/test/repo.git",
+            commit_sha=commit_sha,
+            environment=environment,
+            workspace_dir=str(workspace),
+            artifacts_dir=str(artifacts),
+            cross_account_role_name="TestCrossAccountRole"
+        )
+        
+        # Mock the AWS API calls - same account
+        with patch('environment_deployment_stage.get_current_account_id', return_value=account):
+            with patch('environment_deployment_stage.assume_cross_account_role') as mock_assume:
+                # Call the cross-account detection method
+                stage.detect_and_assume_cross_account_role()
+                
+                # Verify that the current account was detected
+                assert stage.current_account_id == account
+                
+                # Verify that no credentials were assumed (same account)
+                assert stage.assumed_credentials is None
+                
+                # Verify that assume_cross_account_role was NOT called
+                mock_assume.assert_not_called()
+
+
+# Feature: aphex-pipeline, Property 14: Cross-account role assumption (role ARN format)
+@settings(max_examples=100)
+@given(
+    target_account=st.text(alphabet='0123456789', min_size=12, max_size=12),
+    role_name=st.text(
+        alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
+        min_size=1,
+        max_size=20
+    )
+)
+def test_property_14_cross_account_role_assumption_role_arn_format(target_account, role_name):
+    """
+    Property 14: Cross-account role assumption (role ARN format)
+    
+    For any target account and role name, the correct role ARN should be constructed
+    in the format: arn:aws:iam::{account}:role/{role_name}
+    
+    Validates: Requirements 7.2
+    """
+    expected_role_arn = f"arn:aws:iam::{target_account}:role/{role_name}"
+    
+    # Mock the STS client
+    mock_sts_client = MagicMock()
+    mock_sts_client.assume_role.return_value = {
+        'Credentials': {
+            'AccessKeyId': 'AKIAIOSFODNN7EXAMPLE',
+            'SecretAccessKey': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+            'SessionToken': 'FwoGZXIvYXdzEBYaDH...'
+        }
+    }
+    
+    with patch('boto3.client', return_value=mock_sts_client):
+        # Call assume_cross_account_role
+        credentials = assume_cross_account_role(
+            target_account=target_account,
+            role_name=role_name,
+            session_name="TestSession"
+        )
+        
+        # Verify that assume_role was called with the correct ARN
+        mock_sts_client.assume_role.assert_called_once()
+        call_args = mock_sts_client.assume_role.call_args
+        
+        # Check that the RoleArn parameter matches the expected format
+        assert call_args[1]['RoleArn'] == expected_role_arn
+        assert call_args[1]['RoleSessionName'] == "TestSession"
+        
+        # Verify credentials were returned
+        assert credentials['AccessKeyId'] == 'AKIAIOSFODNN7EXAMPLE'
+        assert credentials['SecretAccessKey'] == 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+        assert credentials['SessionToken'] == 'FwoGZXIvYXdzEBYaDH...'
+
+
+# Feature: aphex-pipeline, Property 14: Cross-account role assumption (credentials structure)
+def test_property_14_cross_account_role_assumption_credentials_structure():
+    """
+    Property 14: Cross-account role assumption (credentials structure)
+    
+    For any successful role assumption, the returned credentials should contain
+    AccessKeyId, SecretAccessKey, and SessionToken.
+    
+    Validates: Requirements 7.2
+    """
+    target_account = "123456789012"
+    role_name = "TestRole"
+    
+    # Mock the STS client
+    mock_sts_client = MagicMock()
+    mock_sts_client.assume_role.return_value = {
+        'Credentials': {
+            'AccessKeyId': 'AKIAIOSFODNN7EXAMPLE',
+            'SecretAccessKey': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+            'SessionToken': 'FwoGZXIvYXdzEBYaDH...',
+            'Expiration': '2024-01-01T00:00:00Z'
+        }
+    }
+    
+    with patch('boto3.client', return_value=mock_sts_client):
+        credentials = assume_cross_account_role(
+            target_account=target_account,
+            role_name=role_name
+        )
+        
+        # Verify credentials structure
+        assert 'AccessKeyId' in credentials
+        assert 'SecretAccessKey' in credentials
+        assert 'SessionToken' in credentials
+        
+        # Verify all values are non-empty strings
+        assert isinstance(credentials['AccessKeyId'], str)
+        assert isinstance(credentials['SecretAccessKey'], str)
+        assert isinstance(credentials['SessionToken'], str)
+        assert len(credentials['AccessKeyId']) > 0
+        assert len(credentials['SecretAccessKey']) > 0
+        assert len(credentials['SessionToken']) > 0
+
+
+# Feature: aphex-pipeline, Property 14: Cross-account role assumption (error handling)
+def test_property_14_cross_account_role_assumption_error_handling():
+    """
+    Property 14: Cross-account role assumption (error handling)
+    
+    For any failed role assumption, an EnvironmentDeploymentError should be raised
+    with a descriptive error message.
+    
+    Validates: Requirements 7.2
+    """
+    target_account = "123456789012"
+    role_name = "NonExistentRole"
+    
+    # Mock the STS client to raise an error
+    mock_sts_client = MagicMock()
+    from botocore.exceptions import ClientError
+    mock_sts_client.assume_role.side_effect = ClientError(
+        {
+            'Error': {
+                'Code': 'AccessDenied',
+                'Message': 'User is not authorized to perform: sts:AssumeRole'
+            }
+        },
+        'AssumeRole'
+    )
+    
+    with patch('boto3.client', return_value=mock_sts_client):
+        # Verify that an EnvironmentDeploymentError is raised
+        with pytest.raises(EnvironmentDeploymentError) as exc_info:
+            assume_cross_account_role(
+                target_account=target_account,
+                role_name=role_name
+            )
+        
+        # Verify the error message contains useful information
+        error_message = str(exc_info.value)
+        assert 'AccessDenied' in error_message
+        assert target_account in error_message
