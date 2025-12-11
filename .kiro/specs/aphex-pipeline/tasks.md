@@ -91,20 +91,20 @@
   - **Property 1: Git commit extraction**
   - **Validates: Requirements 1.3**
 
-- [ ] 5. Create container images for pipeline stages
-- [ ] 5.1 Create builder container image
+- [x] 5. Create container images for pipeline stages
+- [x] 5.1 Create builder container image
   - Base image with Node.js, Python, build tools
   - Install AWS CLI and CDK CLI
   - Add git for repository cloning
   - _Requirements: 2.1, 2.2_
 
-- [ ] 5.2 Create deployer container image
+- [x] 5.2 Create deployer container image
   - Base image with CDK CLI, kubectl, Python
   - Install AWS CLI for CloudFormation operations
   - Add YAML processing libraries
   - _Requirements: 3.2, 5.1_
 
-- [ ] 5.3 Create Dockerfiles and build scripts
+- [x] 5.3 Create Dockerfiles and build scripts
   - Write Dockerfiles for both images
   - Create build script to push to ECR
   - Tag images with version numbers
