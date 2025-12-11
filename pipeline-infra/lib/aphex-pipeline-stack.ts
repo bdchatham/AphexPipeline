@@ -5,6 +5,17 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
+import * as path from 'path';
+import { ConfigParser } from './config-parser';
+import { WorkflowTemplateGenerator } from './workflow-template-generator';
+
+export interface AphexPipelineStackProps extends cdk.StackProps {
+  /**
+   * Path to the aphex-config.yaml file.
+   * Defaults to '../aphex-config.yaml' (relative to pipeline-infra directory).
+   */
+  configPath?: string;
+}
 
 export class AphexPipelineStack extends cdk.Stack {
   public readonly cluster: eks.Cluster;
@@ -14,8 +25,12 @@ export class AphexPipelineStack extends cdk.Stack {
   public readonly artifactBucketName: string;
   public readonly workflowExecutionRoleArn: string;
 
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props?: AphexPipelineStackProps) {
     super(scope, id, props);
+
+    // Parse aphex-config.yaml
+    const configPath = props?.configPath || path.join(__dirname, '../../aphex-config.yaml');
+    const aphexConfig = ConfigParser.parse(configPath);
 
     // Create VPC for EKS cluster
     const vpc = new ec2.Vpc(this, 'AphexPipelineVpc', {
@@ -230,6 +245,19 @@ export class AphexPipelineStack extends cdk.Stack {
 
     // Store artifact bucket name
     this.artifactBucketName = artifactBucket.bucketName;
+
+    // Generate and apply WorkflowTemplate based on aphex-config.yaml
+    const workflowGenerator = new WorkflowTemplateGenerator(
+      aphexConfig,
+      this.artifactBucketName,
+      'workflow-executor'
+    );
+    const workflowTemplate = workflowGenerator.generate();
+
+    // Apply WorkflowTemplate to the cluster
+    const workflowTemplateManifest = this.cluster.addManifest('AphexPipelineWorkflowTemplate', workflowTemplate);
+    workflowTemplateManifest.node.addDependency(argoWorkflows);
+    workflowTemplateManifest.node.addDependency(workflowServiceAccount);
 
     // Placeholder values for components to be implemented in subsequent tasks
     // Argo Workflows URL will be the LoadBalancer DNS

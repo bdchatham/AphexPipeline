@@ -110,23 +110,23 @@
   - Tag images with version numbers
   - _Requirements: 2.1, 3.2_
 
-- [ ] 6. Implement WorkflowTemplate generator
-- [ ] 6.1 Create WorkflowTemplate generator script
+- [x] 6. Implement WorkflowTemplate generator
+- [x] 6.1 Create WorkflowTemplate generator script
   - Parse aphex-config.yaml
   - Generate build stage YAML
   - Generate pipeline deployment stage YAML
   - Generate environment stages for each configured environment
   - _Requirements: 3.5, 4.1_
 
-- [ ] 6.2 Write property test for WorkflowTemplate generation
+- [x] 6.2 Write property test for WorkflowTemplate generation
   - **Property 6: WorkflowTemplate generation from configuration**
   - **Validates: Requirements 3.5**
 
-- [ ] 6.3 Write property test for stack deployment ordering
+- [x] 6.3 Write property test for stack deployment ordering
   - **Property 9: Stack deployment ordering**
   - **Validates: Requirements 4.3, 5.2**
 
-- [ ] 6.4 Implement kubectl apply logic
+- [x] 6.4 Implement kubectl apply logic
   - Apply generated WorkflowTemplate to Argo
   - Handle errors from kubectl
   - _Requirements: 3.6_
