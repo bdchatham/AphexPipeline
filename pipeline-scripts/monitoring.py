@@ -8,7 +8,7 @@ and notification delivery capabilities.
 import json
 import os
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional, List, Dict, Any
 import boto3
 from botocore.exceptions import ClientError
@@ -213,7 +213,7 @@ class CloudWatchMetricsEmitter:
             'Value': 1.0,
             'Unit': 'Count',
             'Dimensions': dimensions,
-            'Timestamp': datetime.utcnow()
+            'Timestamp': datetime.now(UTC)
         })
         
         # Duration metric if provided
@@ -223,7 +223,7 @@ class CloudWatchMetricsEmitter:
                 'Value': duration_seconds,
                 'Unit': 'Seconds',
                 'Dimensions': [d for d in dimensions if d['Name'] != 'Status'],
-                'Timestamp': datetime.utcnow()
+                'Timestamp': datetime.now(UTC)
             })
         
         # Put metrics to CloudWatch
@@ -258,7 +258,7 @@ class CloudWatchMetricsEmitter:
             'Value': 1.0,
             'Unit': 'Count',
             'Dimensions': dimensions,
-            'Timestamp': datetime.utcnow()
+            'Timestamp': datetime.now(UTC)
         })
         
         # Duration metric if provided
@@ -268,7 +268,7 @@ class CloudWatchMetricsEmitter:
                 'Value': duration_seconds,
                 'Unit': 'Seconds',
                 'Dimensions': [],
-                'Timestamp': datetime.utcnow()
+                'Timestamp': datetime.now(UTC)
             })
         
         # Put metrics to CloudWatch
@@ -397,7 +397,7 @@ def create_workflow_metadata(
         WorkflowMetadata object
     """
     if triggered_at is None:
-        triggered_at = datetime.utcnow()
+        triggered_at = datetime.now(UTC)
     
     return WorkflowMetadata(
         workflow_id=workflow_id,
@@ -424,7 +424,7 @@ def create_stage_metadata(
         StageMetadata object
     """
     if started_at is None:
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
     
     return StageMetadata(
         stage_name=stage_name,

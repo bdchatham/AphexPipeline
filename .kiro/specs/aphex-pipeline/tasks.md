@@ -319,7 +319,7 @@
   - Configure log retention
   - _Requirements: 8.1_
 
-- [ ] 13. Implement validation logic
+- [-] 13. Implement validation logic
 - [ ] 13.1 Write property test for AWS credential validation
   - **Property 20: AWS credential validation**
   - **Validates: Requirements 9.3**

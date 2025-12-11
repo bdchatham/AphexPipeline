@@ -7,7 +7,7 @@ and notification delivery across a wide range of valid inputs.
 
 import pytest
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from hypothesis import given, strategies as st, settings, assume
 from moto import mock_aws
 import boto3
@@ -88,7 +88,7 @@ def valid_iso_datetime(draw):
     minutes = draw(st.integers(min_value=0, max_value=59))
     seconds = draw(st.integers(min_value=0, max_value=59))
     
-    dt = datetime.utcnow() - timedelta(days=days_ago, hours=hours, minutes=minutes, seconds=seconds)
+    dt = datetime.now(UTC) - timedelta(days=days_ago, hours=hours, minutes=minutes, seconds=seconds)
     return dt.isoformat()
 
 
@@ -257,7 +257,7 @@ def test_property_16_workflow_metadata_update_status(metadata, new_status):
     recorder.record_workflow_metadata(metadata)
     
     # Update status
-    completed_at = datetime.utcnow().isoformat() if new_status in ['succeeded', 'failed'] else None
+    completed_at = datetime.now(UTC).isoformat() if new_status in ['succeeded', 'failed'] else None
     recorder.update_workflow_status(metadata.workflow_id, new_status, completed_at)
     
     # Retrieve updated metadata
