@@ -170,28 +170,28 @@
   - Fail workflow on build error
   - _Requirements: 2.5_
 
-- [ ] 8. Implement pipeline deployment stage logic
-- [ ] 8.1 Create pipeline deployment script
+- [x] 8. Implement pipeline deployment stage logic
+- [x] 8.1 Create pipeline deployment script
   - Clone repository at commit SHA
   - Synthesize Pipeline CDK Stack
   - Deploy Pipeline CDK Stack
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 8.2 Add configuration reading logic
+- [x] 8.2 Add configuration reading logic
   - Read aphex-config.yaml after deployment
   - Parse and validate configuration
   - _Requirements: 3.4_
 
-- [ ] 8.3 Integrate WorkflowTemplate generator
+- [x] 8.3 Integrate WorkflowTemplate generator
   - Call generator with parsed configuration
   - Apply generated WorkflowTemplate
   - _Requirements: 3.5, 3.6_
 
-- [ ] 8.4 Write property test for self-modification visibility
+- [x] 8.4 Write property test for self-modification visibility
   - **Property 7: Self-modification visibility**
   - **Validates: Requirements 3.7, 4.5**
 
-- [ ] 8.5 Add error handling for pipeline deployment failures
+- [x] 8.5 Add error handling for pipeline deployment failures
   - Capture CDK errors
   - Continue with existing topology on failure
   - Log errors for debugging
