@@ -18,11 +18,10 @@ describe('AphexPipelineStack', () => {
         region: 'us-east-1',
       },
       // Required parameters for testing
+      clusterName: 'test-cluster',
       githubOwner: 'test-org',
       githubRepo: 'test-repo',
       githubTokenSecretName: 'test-github-token',
-      // Optional: use defaults for other parameters
-      clusterExportName: 'AphexCluster-ClusterName',
     });
     template = Template.fromStack(stack);
   });
