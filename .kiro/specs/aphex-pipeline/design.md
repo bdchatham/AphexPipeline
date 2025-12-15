@@ -4,16 +4,18 @@
 
 AphexPipeline is a self-modifying CDK deployment platform that operates as a traditional CI/CD pipeline with the unique capability to dynamically alter its own workflow topology. Built on Amazon EKS, Argo Workflows, and Argo Events, it provides a generic, reusable infrastructure for deploying any CDK-based application across multiple AWS environments.
 
-The platform follows a just-in-time synthesis approach where CDK stacks are synthesized immediately before deployment at each stage, ensuring that deployments always use the latest code from the current git commit. The pipeline itself is defined as a CDK stack, enabling infrastructure-as-code management of the entire CI/CD platform.
+The platform follows a just-in-time synthesis approach where CDK stacks are synthesized immediately before deployment at each stage, ensuring that deployments always use the latest code from the current git commit. The pipeline itself is defined as a CDK stack that deploys pipeline-specific resources to an existing EKS cluster, enabling infrastructure-as-code management of the CI/CD pipeline.
 
 ### Key Characteristics
 
+- **Cluster-Agnostic**: Runs on an existing EKS cluster with Argo Workflows and Argo Events pre-installed
+- **Multi-Tenant**: Multiple pipeline instances can share the same cluster infrastructure
 - **Self-Modifying**: Updates its own workflow topology based on configuration changes
 - **Just-in-Time Synthesis**: Synthesizes CDK stacks at each stage right before deployment
 - **Application-Agnostic**: Works with any CDK-based infrastructure without application-specific logic
 - **Event-Driven**: Triggered automatically by GitHub webhooks via Argo Events
 - **Traditional Pipeline Flow**: Linear progression through stages without declarative state management
-- **Infrastructure-as-Code**: The pipeline infrastructure itself is defined using AWS CDK
+- **Infrastructure-as-Code**: The pipeline resources are defined using AWS CDK
 
 ## Architecture
 
@@ -28,19 +30,24 @@ graph TB
         Config["Configuration<br/>(aphex-config.yaml)"]
     end
     
-    subgraph EKS["Amazon EKS Cluster"]
-        subgraph ArgoEvents["Argo Events"]
-            EventSource["EventSource<br/>(GitHub webhook receiver)"]
-            EventBus["EventBus<br/>(event routing)"]
-            Sensor["Sensor<br/>(filters & triggers)"]
+    subgraph EKS["Existing EKS Cluster<br/>(Managed by aphex-cluster package)"]
+        subgraph ArgoEvents["Argo Events<br/>(Pre-installed)"]
+            EventBus["EventBus<br/>(shared)"]
         end
         
-        subgraph ArgoWorkflows["Argo Workflows"]
-            WorkflowTemplate["WorkflowTemplate<br/>(defines topology)"]
-            WorkflowInstance["Workflow Instances<br/>(executes stages)"]
+        subgraph ArgoWorkflows["Argo Workflows<br/>(Pre-installed)"]
+            Controller["Workflow Controller<br/>(shared)"]
+        end
+        
+        subgraph PipelineResources["Pipeline-Specific Resources"]
+            EventSource["EventSource<br/>(pipeline-specific)"]
+            Sensor["Sensor<br/>(pipeline-specific)"]
+            WorkflowTemplate["WorkflowTemplate<br/>(pipeline-specific)"]
+            ServiceAccount["Service Account<br/>(pipeline-specific)"]
         end
         
         subgraph K8sPods["Kubernetes Pods"]
+            WorkflowInstance["Workflow Instances"]
             BuildPod["Build Stage Pod"]
             PipelinePod["Pipeline Deployment Pod"]
             EnvPods["Environment Stage Pods"]
@@ -49,7 +56,7 @@ graph TB
     
     subgraph AWS["AWS Services"]
         IAM["IAM<br/>(IRSA, cross-account roles)"]
-        S3["S3<br/>(artifact storage)"]
+        S3["S3<br/>(artifact storage, pipeline-specific)"]
         CFN["CloudFormation<br/>(CDK deployments)"]
         CW["CloudWatch<br/>(metrics, logs)"]
         TargetAccounts["Target AWS Accounts/Regions"]
@@ -60,6 +67,7 @@ graph TB
     EventBus --> Sensor
     Sensor -->|Creates Workflow| WorkflowInstance
     WorkflowTemplate -.->|Template for| WorkflowInstance
+    Controller -->|Manages| WorkflowInstance
     WorkflowInstance -->|Executes Stages| BuildPod
     WorkflowInstance -->|Executes Stages| PipelinePod
     WorkflowInstance -->|Executes Stages| EnvPods
@@ -68,6 +76,10 @@ graph TB
     K8sPods --> CFN
     K8sPods --> CW
     CFN --> TargetAccounts
+    
+    PipelineCDK -.->|Deploys| PipelineResources
+    PipelineCDK -.->|Creates| S3
+    PipelineCDK -.->|Creates| IAM
 ```
 
 ### Pipeline Flow
@@ -113,37 +125,106 @@ sequenceDiagram
     ArgoWorkflows->>GitHub: Workflow Complete
 ```
 
+## Cluster Requirements
+
+AphexPipeline requires an existing EKS cluster with the following components pre-installed:
+
+### Required Cluster Components
+
+1. **Argo Workflows** (v3.4+)
+   - Workflow Controller running
+   - Workflow Server (UI) accessible
+   - Configured with appropriate RBAC
+
+2. **Argo Events** (v1.7+)
+   - Event Controller running
+   - EventBus deployed (typically named "default")
+   - Configured with appropriate RBAC
+
+3. **Cluster Access**
+   - kubectl access configured for CDK deployment
+   - IAM permissions to create service accounts with IRSA
+   - IAM permissions to create namespaces and apply manifests
+
+### Cluster Setup
+
+The cluster infrastructure is managed by the separate **aphex-cluster** package, which provides:
+- EKS cluster with appropriate node groups
+- VPC and networking configuration
+- Argo Workflows installation via Helm
+- Argo Events installation via Helm
+- Base RBAC configuration
+- Cluster-level monitoring and logging
+
+Multiple AphexPipeline instances can share the same cluster, with isolation provided by:
+- Unique namespaces (optional)
+- Unique resource names (WorkflowTemplate, EventSource, Sensor)
+- Pipeline-specific service accounts and IAM roles
+- Pipeline-specific S3 buckets
+
 ## Components and Interfaces
 
 ### 1. Pipeline CDK Stack
 
-**Purpose**: Defines the AphexPipeline infrastructure using AWS CDK.
+**Purpose**: Defines pipeline-specific resources that are deployed to an existing EKS cluster.
 
 **Location**: `pipeline-infra/` directory in the repository
 
 **Components**:
-- **EKS Cluster**: Managed Kubernetes cluster for running Argo
-- **Argo Workflows**: Installed via Helm chart
-- **Argo Events**: Installed via Helm chart
-- **IAM Roles**: IRSA roles for AWS access, cross-account roles
-- **S3 Bucket**: Artifact storage with encryption and versioning
-- **VPC**: Network infrastructure for EKS cluster
+- **Cluster Reference**: Imports existing EKS cluster by name or ARN
+- **Namespace**: Pipeline-specific namespace (optional, can use shared namespace)
+- **WorkflowTemplate**: Pipeline-specific workflow definition
+- **EventSource**: Pipeline-specific GitHub webhook receiver
+- **Sensor**: Pipeline-specific workflow trigger
+- **Service Account**: Pipeline-specific service account with IRSA
+- **IAM Role**: IRSA role for AWS access, cross-account roles
+- **S3 Bucket**: Pipeline-specific artifact storage with encryption and versioning
+
+**Inputs**:
+- Cluster reference (optional, defaults to CloudFormation export lookup)
+- Cluster export name (optional, defaults to "AphexCluster-ClusterName")
+- GitHub repository owner and name (required)
+- GitHub token secret name (required)
+- Configuration file path (optional, defaults to aphex-config.yaml)
+
+**Cluster Reference Strategy**:
+For the MVP, the pipeline uses CloudFormation exports to reference the cluster:
+- The aphex-cluster package exports cluster attributes (cluster name, security group, etc.)
+- The pipeline imports these values using `Fn.importValue()` with a naming convention
+- Default export name: "AphexCluster-ClusterName"
+- This approach provides loose coupling while maintaining simplicity
 
 **Outputs**:
-- Argo Workflows UI URL
-- Argo Events webhook URL
+- Pipeline-specific webhook URL
 - S3 bucket name for artifacts
-- IAM role ARNs
+- IAM role ARN for workflow execution
+- WorkflowTemplate name
 
 **Interface**:
 ```typescript
 // pipeline-infra/lib/aphex-pipeline-stack.ts
+export interface AphexPipelineStackProps extends cdk.StackProps {
+  // Optional: Cluster reference (defaults to CloudFormation export lookup)
+  clusterExportName?: string;  // Default: "AphexCluster-ClusterName"
+  
+  // Required: GitHub configuration
+  githubOwner: string;
+  githubRepo: string;
+  githubTokenSecretName: string;
+  
+  // Optional: Configuration
+  configPath?: string;
+  githubBranch?: string;
+  pipelineNamespace?: string;
+  workflowTemplateName?: string;
+  // ... other optional props
+}
+
 export class AphexPipelineStack extends cdk.Stack {
-  public readonly clusterName: string;
-  public readonly argoWorkflowsUrl: string;
-  public readonly argoEventsWebhookUrl: string;
+  public readonly webhookUrl: string;
   public readonly artifactBucketName: string;
   public readonly workflowExecutionRoleArn: string;
+  public readonly workflowTemplateName: string;
 }
 ```
 
@@ -315,16 +396,23 @@ def apply_workflow_template(template_yaml: str) -> None:
 
 ### 5. Pipeline Deployment Stage
 
-**Purpose**: Synthesizes and deploys the Pipeline CDK Stack, then updates the WorkflowTemplate.
+**Purpose**: Synthesizes and deploys the Pipeline CDK Stack (pipeline-specific resources only), then updates the WorkflowTemplate.
 
 **Container Image**: Custom image with CDK CLI, kubectl, Python
 
 **Inputs**:
 - Git repository URL
 - Commit SHA
+- Cluster name (from environment variable or workflow parameter)
 
 **Outputs**:
 - Updated WorkflowTemplate applied to Argo
+- Updated pipeline-specific resources (EventSource, Sensor, Service Account)
+
+**Behavior**:
+- Does NOT modify cluster infrastructure (EKS, Argo Workflows, Argo Events)
+- Only updates pipeline-specific resources
+- Running workflows are not interrupted
 
 **Implementation**:
 ```yaml
@@ -343,20 +431,18 @@ def apply_workflow_template(template_yaml: str) -> None:
         cd /workspace
         git checkout {{inputs.parameters.commit-sha}}
         
-        # Synthesize Pipeline CDK Stack
+        # Synthesize Pipeline CDK Stack (pipeline-specific resources only)
         cd pipeline-infra
         cdk synth AphexPipelineStack
         
-        # Deploy Pipeline CDK Stack
+        # Deploy Pipeline CDK Stack (updates WorkflowTemplate, EventSource, Sensor, etc.)
+        # This does NOT modify the cluster itself
         cdk deploy AphexPipelineStack --require-approval never
         
-        # Generate and apply WorkflowTemplate
-        cd /workspace
-        python pipeline-scripts/generate-workflow-template.py \
-          --config aphex-config.yaml \
-          --output /tmp/workflow-template.yaml
+        # The CDK stack handles applying the updated WorkflowTemplate
+        # via cluster.addManifest() which uses kubectl internally
         
-        kubectl apply -f /tmp/workflow-template.yaml
+        echo "Pipeline deployment complete - changes will take effect in next workflow run"
 ```
 
 ### 6. Environment Stage
@@ -717,6 +803,18 @@ class ArtifactMetadata:
 
 **Validates: Requirements 12.5**
 
+### Property 26: Cluster resource isolation
+
+*For any* pipeline instance deployed to a shared cluster, it should not modify or delete resources belonging to other pipeline instances.
+
+**Validates: Requirements 14.4**
+
+### Property 27: Pipeline destruction cleanup
+
+*For any* pipeline instance that is destroyed, only pipeline-specific resources should be removed, and the cluster should remain intact.
+
+**Validates: Requirements 14.5**
+
 ## Error Handling
 
 ### Build Stage Failures
@@ -908,88 +1006,107 @@ class ArtifactMetadata:
 ### Bootstrap Process
 
 **Prerequisites**:
+- **Existing EKS cluster** with Argo Workflows and Argo Events installed (via aphex-cluster package)
 - AWS account with appropriate permissions
 - AWS CLI configured
-- kubectl installed
+- kubectl configured for cluster access
 - CDK CLI installed
 - GitHub repository with admin access
 
 **Steps**:
 
-1. **Clone Repository**
+1. **Verify Cluster Prerequisites**
+   ```bash
+   # Set cluster name
+   export CLUSTER_NAME=<your-cluster-name>
+   export AWS_REGION=us-east-1
+   
+   # Configure kubectl
+   aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
+   
+   # Verify Argo Workflows is installed
+   kubectl get pods -n argo
+   kubectl get workflowtemplate -n argo
+   
+   # Verify Argo Events is installed
+   kubectl get pods -n argo-events
+   kubectl get eventbus -n argo-events
+   ```
+
+2. **Clone Repository**
    ```bash
    git clone <repo-url>
    cd <repo>
    ```
 
-2. **Configure AWS Credentials**
+3. **Configure AWS Credentials**
    ```bash
    aws configure
-   export AWS_REGION=us-east-1
    export AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
    ```
 
-3. **Bootstrap CDK** (if not already done)
+4. **Bootstrap CDK** (if not already done)
    ```bash
    cdk bootstrap aws://${AWS_ACCOUNT}/${AWS_REGION}
    ```
 
-4. **Deploy Pipeline CDK Stack**
+5. **Create GitHub Token Secret**
+   ```bash
+   aws secretsmanager create-secret \
+     --name github-token \
+     --secret-string '{"token":"ghp_your_token_here"}'
+   ```
+
+6. **Deploy Pipeline CDK Stack**
    ```bash
    cd pipeline-infra
    npm install
+   
+   # Update bin/aphex-pipeline.ts with your cluster name and GitHub details
+   # Then deploy
    cdk synth AphexPipelineStack
    cdk deploy AphexPipelineStack --require-approval never
    ```
 
-5. **Capture Outputs**
+7. **Capture Outputs**
    ```bash
-   export CLUSTER_NAME=$(aws cloudformation describe-stacks \
-     --stack-name AphexPipelineStack \
-     --query 'Stacks[0].Outputs[?OutputKey==`ClusterName`].OutputValue' \
-     --output text)
-   
-   export ARGO_URL=$(aws cloudformation describe-stacks \
-     --stack-name AphexPipelineStack \
-     --query 'Stacks[0].Outputs[?OutputKey==`ArgoWorkflowsUrl`].OutputValue' \
-     --output text)
-   
    export WEBHOOK_URL=$(aws cloudformation describe-stacks \
      --stack-name AphexPipelineStack \
-     --query 'Stacks[0].Outputs[?OutputKey==`ArgoEventsWebhookUrl`].OutputValue' \
+     --query 'Stacks[0].Outputs[?OutputKey==`WebhookUrl`].OutputValue' \
+     --output text)
+   
+   export ARTIFACT_BUCKET=$(aws cloudformation describe-stacks \
+     --stack-name AphexPipelineStack \
+     --query 'Stacks[0].Outputs[?OutputKey==`ArtifactBucketName`].OutputValue' \
+     --output text)
+   
+   export WORKFLOW_TEMPLATE=$(aws cloudformation describe-stacks \
+     --stack-name AphexPipelineStack \
+     --query 'Stacks[0].Outputs[?OutputKey==`WorkflowTemplateName`].OutputValue' \
      --output text)
    ```
 
-6. **Configure kubectl**
+8. **Verify Pipeline Resources**
    ```bash
-   aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
-   kubectl get nodes
+   # Check WorkflowTemplate was created
+   kubectl get workflowtemplate ${WORKFLOW_TEMPLATE} -n argo
+   
+   # Check EventSource was created
+   kubectl get eventsource -n argo-events
+   
+   # Check Sensor was created
+   kubectl get sensor -n argo-events
+   
+   # Check Service Account was created
+   kubectl get serviceaccount -n argo
    ```
 
-7. **Apply Initial WorkflowTemplate**
-   ```bash
-   cd ..
-   kubectl apply -f .argo/workflow-template-initial.yaml
-   ```
-
-8. **Configure GitHub Webhook**
+9. **Configure GitHub Webhook**
    - Go to GitHub repository settings
    - Add webhook with URL: ${WEBHOOK_URL}
    - Content type: application/json
    - Events: Push events, Pull request events
    - Save webhook
-
-9. **Verify Setup**
-   ```bash
-   # Check Argo Events is running
-   kubectl get pods -n argo-events
-   
-   # Check Argo Workflows is running
-   kubectl get pods -n argo
-   
-   # Access Argo UI
-   echo "Argo UI: ${ARGO_URL}"
-   ```
 
 10. **Trigger First Workflow**
     ```bash
@@ -998,7 +1115,7 @@ class ArtifactMetadata:
     ```
 
 11. **Monitor First Workflow**
-    - Open Argo UI at ${ARGO_URL}
+    - Get Argo UI URL from cluster (managed by aphex-cluster)
     - Watch workflow execution
     - Verify all stages complete successfully
 
@@ -1070,4 +1187,18 @@ class ArtifactMetadata:
 3. Verify kubectl apply succeeded
 4. Check WorkflowTemplate in cluster: `kubectl get workflowtemplate -n argo`
 5. Verify next workflow run uses new template
+
+**Cluster Access Issues**:
+1. Verify cluster exists and is accessible: `kubectl get nodes`
+2. Check cluster name in Pipeline CDK Stack props
+3. Verify IAM permissions for kubectl access
+4. Check EKS cluster authentication: `aws eks describe-cluster --name <cluster-name>`
+5. Verify Argo Workflows and Argo Events are installed and running
+
+**Multiple Pipelines Interfering**:
+1. Verify each pipeline has unique WorkflowTemplate name
+2. Verify each pipeline has unique EventSource name
+3. Verify each pipeline has unique Sensor name
+4. Check for resource name collisions: `kubectl get all -n argo`
+5. Consider using separate namespaces for each pipeline
 

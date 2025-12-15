@@ -1,474 +1,507 @@
-# API Documentation
+# API Reference
 
-This document describes the Python APIs provided by AphexPipeline's pipeline scripts.
+## AphexPipeline Construct
 
-## Configuration Parser API
+The main CDK construct for creating deployment pipelines.
 
-### Module: `config_parser`
+**Source**
+- `pipeline-infra/lib/aphex-pipeline-stack.ts`
 
-#### `parse_config(config_path: str, schema_path: str = "aphex-config.schema.json") -> AphexConfig`
+### Interface
 
-Parses and validates an AphexPipeline configuration file.
-
-**Parameters**:
-- `config_path` (str): Path to the aphex-config.yaml file
-- `schema_path` (str, optional): Path to the JSON schema file. Defaults to "aphex-config.schema.json"
-
-**Returns**:
-- `AphexConfig`: Parsed and validated configuration object
-
-**Raises**:
-- `FileNotFoundError`: If config or schema file doesn't exist
-- `ValidationError`: If config doesn't match schema
-- `yaml.YAMLError`: If YAML is malformed
-
-**Example**:
-```python
-from config_parser import parse_config
-
-config = parse_config('aphex-config.yaml')
-print(f"Version: {config.version}")
-print(f"Environments: {len(config.environments)}")
-for env in config.environments:
-    print(f"  - {env.name}: {env.region} ({env.account})")
+```typescript
+export interface AphexPipelineProps extends cdk.StackProps {
+  // ===== Required Parameters =====
+  
+  /**
+   * Name of existing AphexCluster to reference
+   * Used to discover cluster via CloudFormation exports
+   */
+  clusterName: string;
+  
+  /**
+   * GitHub repository owner (organization or user)
+   */
+  githubOwner: string;
+  
+  /**
+   * GitHub repository name
+   */
+  githubRepo: string;
+  
+  /**
+   * AWS Secrets Manager secret name containing GitHub token
+   */
+  githubTokenSecretName: string;
+  
+  // ===== Stack Configuration =====
+  
+  /**
+   * CDK stacks to deploy
+   */
+  stacks: StackDefinition[];
+  
+  /**
+   * Deployment environments
+   */
+  environments: EnvironmentDefinition[];
+  
+  // ===== Optional Configuration =====
+  
+  /**
+   * GitHub branch to trigger on
+   * @default 'main'
+   */
+  githubBranch?: string;
+  
+  /**
+   * Build commands to execute
+   * @default []
+   */
+  buildCommands?: string[];
+  
+  // ===== Container Image Overrides =====
+  
+  /**
+   * Builder container image
+   * @default 'public.ecr.aws/aphex/builder:latest'
+   */
+  builderImage?: string;
+  
+  /**
+   * Deployer container image
+   * @default 'public.ecr.aws/aphex/deployer:latest'
+   */
+  deployerImage?: string;
+  
+  /**
+   * Tester container image
+   * @default 'public.ecr.aws/aphex/tester:latest'
+   */
+  testerImage?: string;
+  
+  /**
+   * Validator container image
+   * @default 'public.ecr.aws/aphex/validator:latest'
+   */
+  validatorImage?: string;
+  
+  // ===== Resource Naming =====
+  
+  /**
+   * WorkflowTemplate name
+   * @default 'aphex-pipeline-template'
+   */
+  workflowTemplateName?: string;
+  
+  /**
+   * EventSource name
+   * @default 'github'
+   */
+  eventSourceName?: string;
+  
+  /**
+   * Sensor name
+   * @default 'aphex-pipeline-sensor'
+   */
+  sensorName?: string;
+  
+  /**
+   * ServiceAccount name
+   * @default 'workflow-executor'
+   */
+  serviceAccountName?: string;
+  
+  /**
+   * Workflow name prefix
+   * @default 'aphex-pipeline-'
+   */
+  workflowNamePrefix?: string;
+  
+  // ===== Artifact Storage =====
+  
+  /**
+   * S3 bucket name for artifacts
+   * @default 'aphex-pipeline-artifacts-{account}-{region}'
+   */
+  artifactBucketName?: string;
+  
+  /**
+   * Artifact retention in days
+   * @default 90
+   */
+  artifactRetentionDays?: number;
+  
+  // ===== Argo Configuration =====
+  
+  /**
+   * Argo Workflows namespace
+   * @default 'argo'
+   */
+  argoNamespace?: string;
+  
+  /**
+   * Argo Events namespace
+   * @default 'argo-events'
+   */
+  argoEventsNamespace?: string;
+}
 ```
 
-#### `class ConfigParser`
+### Stack Definition
 
-Configuration parser class for more control over parsing.
-
-**Constructor**:
-```python
-ConfigParser(schema_path: str = "aphex-config.schema.json")
+```typescript
+export interface StackDefinition {
+  /**
+   * CDK stack name
+   */
+  name: string;
+  
+  /**
+   * Path to stack file relative to repository root
+   */
+  path: string;
+  
+  /**
+   * Stack dependencies (must be deployed first)
+   * @default []
+   */
+  dependsOn?: string[];
+}
 ```
 
-**Methods**:
+### Environment Definition
 
-##### `parse(config_path: str) -> AphexConfig`
-
-Parse and validate a configuration file.
-
-**Example**:
-```python
-from config_parser import ConfigParser
-
-parser = ConfigParser(schema_path='custom-schema.json')
-config = parser.parse('aphex-config.yaml')
+```typescript
+export interface EnvironmentDefinition {
+  /**
+   * Environment name (e.g., 'dev', 'staging', 'prod')
+   */
+  name: string;
+  
+  /**
+   * AWS account ID
+   */
+  account: string;
+  
+  /**
+   * AWS region
+   */
+  region: string;
+  
+  /**
+   * Stacks to deploy in this environment
+   */
+  stacks: string[];
+  
+  /**
+   * Optional post-deployment tests
+   */
+  tests?: TestDefinition;
+  
+  /**
+   * Require manual approval before deployment
+   * @default false
+   */
+  requiresApproval?: boolean;
+}
 ```
 
-## Validation API
+### Test Definition
 
-### Module: `validation`
-
-#### `validate_aws_credentials(account_id: Optional[str] = None, region: Optional[str] = None) -> bool`
-
-Validates that AWS credentials are available and valid.
-
-**Parameters**:
-- `account_id` (str, optional): AWS account ID to validate against
-- `region` (str, optional): AWS region to set
-
-**Returns**:
-- `bool`: True if credentials are valid
-
-**Raises**:
-- `ValidationError`: If credentials are invalid or unavailable
-
-**Example**:
-```python
-from validation import validate_aws_credentials
-
-try:
-    validate_aws_credentials(account_id='123456789012', region='us-east-1')
-    print("Credentials valid!")
-except ValidationError as e:
-    print(f"Validation failed: {e}")
+```typescript
+export interface TestDefinition {
+  /**
+   * Test commands to execute
+   */
+  commands: string[];
+}
 ```
 
-#### `validate_cdk_context(context_requirements: List[str], cdk_json_path: str = "cdk.json") -> bool`
+## Usage Examples
 
-Validates that required CDK context values are present.
+### Minimal Configuration
 
-**Parameters**:
-- `context_requirements` (List[str]): List of required context keys
-- `cdk_json_path` (str, optional): Path to cdk.json file. Defaults to "cdk.json"
+```typescript
+import { AphexPipeline } from 'aphex-pipeline';
 
-**Returns**:
-- `bool`: True if all required context values are present
-
-**Raises**:
-- `ValidationError`: If required context values are missing
-
-**Example**:
-```python
-from validation import validate_cdk_context
-
-try:
-    validate_cdk_context(['vpc-id', 'subnet-ids'], 'cdk.json')
-    print("CDK context valid!")
-except ValidationError as e:
-    print(f"Missing context: {e}")
+new AphexPipeline(this, 'Pipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+  stacks: [
+    { name: 'AppStack', path: 'lib/app-stack.ts' },
+  ],
+  environments: [
+    { name: 'dev', account: '111', region: 'us-east-1', stacks: ['AppStack'] },
+  ],
+});
 ```
 
-#### `validate_build_tools(required_tools: List[str]) -> bool`
+**Source**
+- `pipeline-infra/examples/single-pipeline-example.ts`
 
-Validates that required build tools are available in the container.
+### With Build Commands
 
-**Parameters**:
-- `required_tools` (List[str]): List of required tool names (e.g., ['npm', 'python3', 'aws'])
-
-**Returns**:
-- `bool`: True if all required tools are available
-
-**Raises**:
-- `ValidationError`: If required tools are missing
-
-**Example**:
-```python
-from validation import validate_build_tools
-
-try:
-    validate_build_tools(['npm', 'node', 'python3'])
-    print("All tools available!")
-except ValidationError as e:
-    print(f"Missing tools: {e}")
+```typescript
+new AphexPipeline(this, 'Pipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+  
+  buildCommands: [
+    'npm install',
+    'npm run build',
+    'npm test',
+  ],
+  
+  stacks: [
+    { name: 'AppStack', path: 'lib/app-stack.ts' },
+  ],
+  
+  environments: [
+    { name: 'dev', account: '111', region: 'us-east-1', stacks: ['AppStack'] },
+  ],
+});
 ```
 
-#### `validate_all(config_path: str, schema_path: str = "aphex-config.schema.json", cdk_json_path: str = "cdk.json", context_requirements: Optional[List[str]] = None) -> Tuple[bool, List[str]]`
+### With Stack Dependencies
 
-Performs all validation checks before workflow execution.
-
-**Parameters**:
-- `config_path` (str): Path to aphex-config.yaml
-- `schema_path` (str, optional): Path to JSON schema
-- `cdk_json_path` (str, optional): Path to cdk.json
-- `context_requirements` (List[str], optional): Required CDK context keys
-
-**Returns**:
-- `Tuple[bool, List[str]]`: (success, list of error messages)
-
-**Example**:
-```python
-from validation import validate_all
-
-success, errors = validate_all(
-    'aphex-config.yaml',
-    context_requirements=['vpc-id']
-)
-
-if success:
-    print("All validations passed!")
-else:
-    print("Validation errors:")
-    for error in errors:
-        print(f"  - {error}")
+```typescript
+new AphexPipeline(this, 'Pipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+  
+  stacks: [
+    { 
+      name: 'DatabaseStack', 
+      path: 'lib/database-stack.ts' 
+    },
+    { 
+      name: 'ApiStack', 
+      path: 'lib/api-stack.ts',
+      dependsOn: ['DatabaseStack']  // Deployed after DatabaseStack
+    },
+    { 
+      name: 'FrontendStack', 
+      path: 'lib/frontend-stack.ts',
+      dependsOn: ['ApiStack']  // Deployed after ApiStack
+    },
+  ],
+  
+  environments: [
+    { 
+      name: 'dev', 
+      account: '111', 
+      region: 'us-east-1',
+      stacks: ['DatabaseStack', 'ApiStack', 'FrontendStack']
+    },
+  ],
+});
 ```
 
-## Monitoring API
+### With Multiple Environments
 
-### Module: `monitoring`
-
-#### `record_workflow_metadata(workflow_id: str, commit_sha: str, branch: str) -> WorkflowMetadata`
-
-Records metadata for a workflow execution.
-
-**Parameters**:
-- `workflow_id` (str): Unique workflow identifier
-- `commit_sha` (str): Git commit SHA
-- `branch` (str): Git branch name
-
-**Returns**:
-- `WorkflowMetadata`: Created metadata object
-
-**Example**:
-```python
-from monitoring import record_workflow_metadata
-
-metadata = record_workflow_metadata(
-    workflow_id='workflow-abc123',
-    commit_sha='a1b2c3d4',
-    branch='main'
-)
-print(f"Workflow {metadata.workflow_id} started at {metadata.triggered_at}")
+```typescript
+new AphexPipeline(this, 'Pipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+  
+  stacks: [
+    { name: 'AppStack', path: 'lib/app-stack.ts' },
+  ],
+  
+  environments: [
+    {
+      name: 'dev',
+      account: '111111111111',
+      region: 'us-east-1',
+      stacks: ['AppStack'],
+    },
+    {
+      name: 'staging',
+      account: '222222222222',
+      region: 'us-east-1',
+      stacks: ['AppStack'],
+      tests: {
+        commands: ['npm run integration-test'],
+      },
+    },
+    {
+      name: 'prod',
+      account: '333333333333',
+      region: 'us-west-2',
+      stacks: ['AppStack'],
+      requiresApproval: true,
+    },
+  ],
+});
 ```
 
-#### `update_workflow_status(workflow_id: str, status: str) -> None`
+### With Custom Container Images
 
-Updates the status of a workflow.
-
-**Parameters**:
-- `workflow_id` (str): Workflow identifier
-- `status` (str): New status ('running', 'succeeded', 'failed')
-
-**Example**:
-```python
-from monitoring import update_workflow_status
-
-update_workflow_status('workflow-abc123', 'succeeded')
+```typescript
+new AphexPipeline(this, 'Pipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+  
+  // Override default images
+  builderImage: 'my-registry/custom-builder:v1.0.0',
+  deployerImage: 'my-registry/custom-deployer:v1.0.0',
+  
+  stacks: [
+    { name: 'AppStack', path: 'lib/app-stack.ts' },
+  ],
+  
+  environments: [
+    { name: 'dev', account: '111', region: 'us-east-1', stacks: ['AppStack'] },
+  ],
+});
 ```
 
-#### `add_stage_metadata(workflow_id: str, stage_name: str, status: str, error_message: Optional[str] = None) -> None`
+### Multi-Pipeline Scenario
 
-Adds metadata for a workflow stage.
+```typescript
+// Frontend pipeline
+new AphexPipeline(this, 'FrontendPipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'frontend',
+  githubTokenSecretName: 'github-token',
+  
+  // Unique naming to avoid conflicts
+  workflowTemplateName: 'frontend-pipeline-template',
+  eventSourceName: 'frontend-github',
+  sensorName: 'frontend-pipeline-sensor',
+  serviceAccountName: 'frontend-workflow-executor',
+  
+  stacks: [
+    { name: 'FrontendStack', path: 'lib/frontend-stack.ts' },
+  ],
+  
+  environments: [
+    { name: 'dev', account: '111', region: 'us-east-1', stacks: ['FrontendStack'] },
+  ],
+});
 
-**Parameters**:
-- `workflow_id` (str): Workflow identifier
-- `stage_name` (str): Name of the stage
-- `status` (str): Stage status
-- `error_message` (str, optional): Error message if stage failed
-
-**Example**:
-```python
-from monitoring import add_stage_metadata
-
-add_stage_metadata(
-    workflow_id='workflow-abc123',
-    stage_name='build',
-    status='succeeded'
-)
+// Backend pipeline
+new AphexPipeline(this, 'BackendPipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'backend',
+  githubTokenSecretName: 'github-token',
+  
+  // Unique naming to avoid conflicts
+  workflowTemplateName: 'backend-pipeline-template',
+  eventSourceName: 'backend-github',
+  sensorName: 'backend-pipeline-sensor',
+  serviceAccountName: 'backend-workflow-executor',
+  
+  stacks: [
+    { name: 'BackendStack', path: 'lib/backend-stack.ts' },
+  ],
+  
+  environments: [
+    { name: 'dev', account: '111', region: 'us-east-1', stacks: ['BackendStack'] },
+  ],
+});
 ```
 
-#### `emit_deployment_metric(stack_name: str, environment: str, status: str, duration: float) -> None`
+**Source**
+- `pipeline-infra/examples/multi-pipeline-example.ts`
 
-Emits CloudWatch metrics for a deployment.
+## Outputs
 
-**Parameters**:
-- `stack_name` (str): Name of the deployed stack
-- `environment` (str): Environment name
-- `status` (str): Deployment status ('success' or 'failure')
-- `duration` (float): Deployment duration in seconds
+The construct creates CloudFormation outputs:
 
-**Example**:
-```python
-from monitoring import emit_deployment_metric
+### ArgoEventsWebhookUrl
+URL for GitHub webhook configuration.
 
-emit_deployment_metric(
-    stack_name='MyAppStack',
-    environment='production',
-    status='success',
-    duration=120.5
-)
-```
+### ArtifactBucketName
+S3 bucket name for build artifacts.
 
-#### `send_notification(workflow_id: str, status: str, message: str, channels: List[str]) -> None`
+### WorkflowExecutionRoleArn
+IAM role ARN for workflow execution (IRSA).
 
-Sends notifications about workflow status.
+### WorkflowTemplateName
+Name of the Argo WorkflowTemplate.
 
-**Parameters**:
-- `workflow_id` (str): Workflow identifier
-- `status` (str): Workflow status
-- `message` (str): Notification message
-- `channels` (List[str]): List of notification channels ('slack', 'email')
+### GitHubWebhookInstructions
+URL to configure GitHub webhook.
 
-**Example**:
-```python
-from monitoring import send_notification
+## Default Values
 
-send_notification(
-    workflow_id='workflow-abc123',
-    status='failed',
-    message='Build stage failed: npm test returned exit code 1',
-    channels=['slack', 'email']
-)
-```
+### Container Images
+- Builder: `public.ecr.aws/aphex/builder:latest`
+- Deployer: `public.ecr.aws/aphex/deployer:latest`
+- Tester: `public.ecr.aws/aphex/tester:latest`
+- Validator: `public.ecr.aws/aphex/validator:latest`
 
-## Build Stage API
+### Resource Names
+- WorkflowTemplate: `aphex-pipeline-template`
+- EventSource: `github`
+- Sensor: `aphex-pipeline-sensor`
+- ServiceAccount: `workflow-executor`
+- Workflow prefix: `aphex-pipeline-`
 
-### Module: `build_stage`
+### Namespaces
+- Argo Workflows: `argo`
+- Argo Events: `argo-events`
 
-#### `class BuildStage`
+### Artifact Storage
+- Bucket name: `aphex-pipeline-artifacts-{account}-{region}`
+- Retention: 90 days
 
-Handles build stage execution.
+## CloudFormation Exports Required
 
-**Methods**:
+The construct expects these exports from the cluster:
 
-##### `clone_repository(repo_url: str, commit_sha: str, workspace: str) -> None`
+- `AphexCluster-${clusterName}-ClusterName`
+- `AphexCluster-${clusterName}-OIDCProviderArn`
+- `AphexCluster-${clusterName}-KubectlRoleArn`
+- `AphexCluster-${clusterName}-ClusterSecurityGroupId`
 
-Clones repository at specific commit.
+These are provided by the `arbiter-pipeline-infrastructure` package.
 
-**Parameters**:
-- `repo_url` (str): Git repository URL
-- `commit_sha` (str): Commit SHA to checkout
-- `workspace` (str): Workspace directory path
-
-##### `execute_build_commands(commands: List[str], workspace: str) -> BuildResult`
-
-Executes build commands.
-
-**Parameters**:
-- `commands` (List[str]): List of build commands
-- `workspace` (str): Workspace directory path
-
-**Returns**:
-- `BuildResult`: Result object with success status and output
-
-##### `tag_artifacts(artifact_path: str, commit_sha: str) -> ArtifactMetadata`
-
-Tags artifacts with commit SHA and timestamp.
-
-**Parameters**:
-- `artifact_path` (str): Path to artifacts
-- `commit_sha` (str): Git commit SHA
-
-**Returns**:
-- `ArtifactMetadata`: Metadata object with tags
-
-##### `upload_to_s3(artifact_path: str, bucket: str, key: str) -> str`
-
-Uploads artifacts to S3.
-
-**Parameters**:
-- `artifact_path` (str): Local path to artifacts
-- `bucket` (str): S3 bucket name
-- `key` (str): S3 object key
-
-**Returns**:
-- `str`: S3 URI of uploaded artifacts
-
-## Environment Deployment API
-
-### Module: `environment_deployment_stage`
-
-#### `class EnvironmentDeploymentStage`
-
-Handles environment deployment stage execution.
-
-**Methods**:
-
-##### `synthesize_stacks(stacks: List[StackConfig], workspace: str) -> List[str]`
-
-Synthesizes CDK stacks just-in-time.
-
-**Parameters**:
-- `stacks` (List[StackConfig]): List of stack configurations
-- `workspace` (str): Workspace directory path
-
-**Returns**:
-- `List[str]`: List of synthesized stack names
-
-##### `deploy_stack(stack_name: str, region: str, account: str) -> Dict[str, Any]`
-
-Deploys a CDK stack.
-
-**Parameters**:
-- `stack_name` (str): Name of the stack
-- `region` (str): AWS region
-- `account` (str): AWS account ID
-
-**Returns**:
-- `Dict[str, Any]`: Stack outputs
-
-##### `assume_cross_account_role(account_id: str, region: str, role_name: str) -> Dict[str, str]`
-
-Assumes cross-account IAM role.
-
-**Parameters**:
-- `account_id` (str): Target AWS account ID
-- `region` (str): AWS region
-- `role_name` (str): IAM role name
-
-**Returns**:
-- `Dict[str, str]`: Temporary credentials
-
-## Test Execution API
-
-### Module: `test_execution_stage`
-
-#### `class TestExecutionStage`
-
-Handles test execution stage.
-
-**Methods**:
-
-##### `execute_tests(commands: List[str], workspace: str) -> TestExecutionResult`
-
-Executes test commands.
-
-**Parameters**:
-- `commands` (List[str]): List of test commands
-- `workspace` (str): Workspace directory path
-
-**Returns**:
-- `TestExecutionResult`: Result object with pass/fail status and logs
-
-## GitHub Event Parser API
-
-### Module: `github_event_parser`
-
-#### `parse_github_event(event_payload: Dict[str, Any]) -> GitHubEvent`
-
-Parses GitHub webhook event payload.
-
-**Parameters**:
-- `event_payload` (Dict[str, Any]): GitHub webhook payload
-
-**Returns**:
-- `GitHubEvent`: Parsed event object with commit SHA, branch, etc.
-
-**Example**:
-```python
-from github_event_parser import parse_github_event
-
-event = parse_github_event(webhook_payload)
-print(f"Commit: {event.commit_sha}")
-print(f"Branch: {event.branch}")
-print(f"Repo: {event.repo_url}")
-```
+**Source**
+- `cluster_implementation_notes.md` (export naming)
 
 ## Error Handling
 
-All APIs use custom exception classes:
-
-### `ValidationError`
-
-Raised when validation fails.
-
-**Attributes**:
-- `message` (str): Error message describing the validation failure
-
-### `BuildError`
-
-Raised when build stage fails.
-
-**Attributes**:
-- `message` (str): Error message
-- `exit_code` (int): Command exit code
-- `stdout` (str): Standard output
-- `stderr` (str): Standard error
-
-### `DeploymentError`
-
-Raised when deployment fails.
-
-**Attributes**:
-- `message` (str): Error message
-- `stack_name` (str): Name of the failed stack
-- `cloudformation_events` (List[Dict]): CloudFormation error events
-
-## CLI Tools
-
-### Validation Stage CLI
-
-```bash
-python pipeline-scripts/validation_stage.py \
-  --config aphex-config.yaml \
-  --schema aphex-config.schema.json \
-  --cdk-json cdk.json \
-  --context-requirements vpc-id subnet-ids \
-  --skip-aws-validation \
-  --skip-cdk-validation \
-  --skip-tool-validation
+### Missing Cluster Exports
+If CloudFormation exports don't exist, deployment fails with:
+```
+Export AphexCluster-{clusterName}-ClusterName not found
 ```
 
-See [Validation Usage](../pipeline-scripts/VALIDATION_USAGE.md) for details.
+**Resolution**: Ensure cluster is deployed and exports are created.
 
-## Source References
+### Invalid Configuration
+If stack or environment configuration is invalid, deployment fails during CDK synthesis.
 
-- **Configuration Parser**: `pipeline-scripts/config_parser.py`
-- **Validation**: `pipeline-scripts/validation.py`
-- **Monitoring**: `pipeline-scripts/monitoring.py`
-- **Build Stage**: `pipeline-scripts/build_stage.py`
-- **Environment Deployment**: `pipeline-scripts/environment_deployment_stage.py`
-- **Test Execution**: `pipeline-scripts/test_execution_stage.py`
-- **GitHub Event Parser**: `pipeline-scripts/github_event_parser.py`
-- **Tests**: `pipeline-scripts/tests/*.py`
+**Resolution**: Verify stack names, paths, and dependencies are correct.
+
+### GitHub Token Missing
+If GitHub token secret doesn't exist, deployment fails.
+
+**Resolution**: Create secret in AWS Secrets Manager:
+```bash
+aws secretsmanager create-secret \
+  --name github-token \
+  --secret-string '{"token":"ghp_..."}'
+```
+
+## Related Documentation
+
+- [Overview](overview.md) - Getting started
+- [Architecture](architecture.md) - System design
+- [Operations](operations.md) - Deployment procedures
+- [Examples](../examples/README.md) - Code examples

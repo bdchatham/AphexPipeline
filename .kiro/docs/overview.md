@@ -2,74 +2,138 @@
 
 ## Purpose
 
-AphexPipeline is a self-modifying CDK deployment platform built on Amazon EKS, Argo Workflows, and Argo Events. It provides automated infrastructure deployment with the unique capability to dynamically alter its own workflow topology based on configuration changes.
+AphexPipeline is a CDK construct package that generates Argo WorkflowTemplates for deploying CDK applications. It provides a declarative way to define multi-environment deployment pipelines that execute on existing Kubernetes infrastructure.
 
-The platform serves as a generic, reusable CI/CD solution for deploying any CDK-based infrastructure across multiple environments and AWS accounts, following a just-in-time synthesis approach where CDK stacks are synthesized immediately before deployment at each stage.
+The package operates as a pure orchestration layer, translating user configuration into Argo workflow definitions that reference execution containers provided by the separate `arbiter-pipeline-infrastructure` package.
+
+**Source**
+- `pipeline-infra/lib/aphex-pipeline-stack.ts`
+- `.kiro/specs/aphex-pipeline/requirements.md`
 
 ## Key Features
 
-### Self-Modification
-- Dynamically updates its own workflow topology based on configuration changes
-- Reads `aphex-config.yaml` during pipeline deployment stage
-- Generates and applies updated WorkflowTemplate to Argo Workflows
-- Changes take effect in the next workflow run
+### Declarative Pipeline Configuration
 
-### Just-in-Time Synthesis
-- Synthesizes CDK stacks immediately before deployment at each stage
-- Ensures deployments always use the latest code from the current git commit
-- No pre-synthesis or caching of templates across stages
-- Traditional CI/CD pipeline flow with linear stage progression
+Define your entire deployment pipeline in CDK:
 
-### Event-Driven Automation
-- Automatically triggers on GitHub push events via webhooks
-- Argo Events receives webhooks and creates workflow instances
-- Filters events (e.g., main branch only) before triggering
-- Queues multiple workflows automatically
+```typescript
+new AphexPipeline(this, 'Pipeline', {
+  clusterName: 'company-pipelines',
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  stacks: [
+    { name: 'DatabaseStack', path: 'lib/database-stack.ts' },
+    { name: 'ApiStack', path: 'lib/api-stack.ts' },
+  ],
+  environments: [
+    { name: 'dev', account: '111', region: 'us-east-1' },
+    { name: 'prod', account: '222', region: 'us-west-2' },
+  ],
+});
+```
+
+### Cluster Discovery
+
+Automatically discovers existing EKS clusters via CloudFormation exports:
+- No library dependency on infrastructure package
+- Runtime discovery at deployment time
+- Works across AWS accounts and regions
+
+**Source**
+- `pipeline-infra/lib/aphex-pipeline-stack.ts` (cluster import logic)
+
+### Container Image Management
+
+Uses published container images with `:latest` tags by default:
+- `public.ecr.aws/aphex/builder:latest` - Build environment
+- `public.ecr.aws/aphex/deployer:latest` - Deployment environment
+- `public.ecr.aws/aphex/tester:latest` - Test environment
+- `public.ecr.aws/aphex/validator:latest` - Validation environment
+
+Users can override with custom images for specific needs.
+
+**Source**
+- `.kiro/specs/aphex-pipeline/requirements.md` (Requirement 15)
 
 ### Multi-Environment Support
-- Deploy to multiple environments (dev, staging, prod) in sequence
-- Each environment can have different AWS regions and accounts
-- Configure stack deployment order per environment
-- Optional post-deployment tests per environment
 
-### Cross-Account Deployments
-- Supports deploying to multiple AWS accounts
-- Uses CDK bootstrap pattern (recommended) or custom IAM roles
-- Automatic detection and assumption of cross-account roles
-- Follows AWS security best practices
+Deploy to multiple environments in sequence:
+- Different AWS accounts per environment
+- Different AWS regions per environment
+- Different stack configurations per environment
+- Optional tests per environment
 
-### Validation First
-- Comprehensive pre-flight checks before workflow execution
-- Validates configuration schema against JSON schema
-- Validates AWS credentials for each environment
-- Validates CDK context requirements
-- Validates build tool availability
-- Fails fast with clear error messages
+**Source**
+- `pipeline-infra/lib/workflow-template-generator.ts`
 
-### Application-Agnostic
-- Works with any CDK-based infrastructure
-- No application-specific code or logic required
-- User-defined build commands from configuration
-- Extensible via hooks for custom logic
+### Multi-Tenancy
 
-### Comprehensive Monitoring
-- Built-in logging to CloudWatch and Argo UI
-- Metrics emission for workflow and deployment success/failure
-- Workflow metadata recording (ID, commit SHA, timestamps, status)
-- Configurable notifications (Slack, email) on completion/failure
+Multiple pipelines share the same cluster infrastructure:
+- Unique resource names prevent conflicts
+- Separate service accounts with IRSA
+- Separate S3 buckets for artifacts
+- Complete isolation between pipelines
 
-## Architecture Overview
+**Source**
+- `pipeline-infra/examples/multi-pipeline-example.ts`
 
-AphexPipeline consists of:
+### Event-Driven Automation
 
-1. **EKS Cluster**: Managed Kubernetes cluster running Argo components
-2. **Argo Workflows**: Orchestrates pipeline stages as Kubernetes pods
-3. **Argo Events**: Receives GitHub webhooks and triggers workflows
-4. **Pipeline CDK Stack**: Defines the pipeline infrastructure itself
-5. **Container Images**: Builder and deployer images with required tools
-6. **S3 Bucket**: Stores build artifacts with versioning
-7. **IAM Roles**: IRSA for workflow execution, cross-account roles
-8. **CloudWatch**: Logging and monitoring
+Automatically triggers on GitHub events:
+- GitHub webhooks received by Argo Events
+- Sensor filters events (e.g., main branch only)
+- Workflow created from WorkflowTemplate
+- Queues multiple workflows automatically
+
+**Source**
+- `.argo/eventsource-github.yaml`
+- `.argo/sensor-aphex-pipeline.yaml`
+
+## Architecture
+
+### Two-Package Design
+
+AphexPipeline follows a clean separation:
+
+1. **arbiter-pipeline-infrastructure** (separate, deployed once):
+   - EKS cluster with Argo Workflows and Argo Events
+   - Published container images
+   - Execution scripts
+   - CloudFormation exports
+
+2. **aphex-pipeline** (this package, deployed per application):
+   - CDK construct for WorkflowTemplate generation
+   - Pipeline-specific resources (EventSource, Sensor, ServiceAccount, S3)
+   - No library dependency on infrastructure package
+
+**Source**
+- `.kiro/docs/architecture.md`
+
+### Deployment Flow
+
+**Step 1: Platform Team** (once)
+```bash
+# Deploy cluster infrastructure
+cdk deploy ArbiterPipelineInfrastructure
+```
+
+**Step 2: Application Teams** (per application)
+```bash
+# Install construct package
+npm install aphex-pipeline
+
+# Deploy pipeline
+cdk deploy MyAppPipeline
+```
+
+**Step 3: Runtime** (automatic)
+- GitHub push triggers webhook
+- Argo Events creates workflow
+- Workflow executes using published containers
+- CDK stacks deployed to target accounts
+
+**Source**
+- `pipeline-infra/examples/single-pipeline-example.ts`
 
 ## Pipeline Stages
 
@@ -78,133 +142,219 @@ AphexPipeline consists of:
 - Validates AWS credentials
 - Validates CDK context
 - Validates build tools
-- Fails fast if any validation fails
+- Fails fast with clear errors
 
 ### 2. Build Stage
-- Clones repository at specific commit SHA
-- Executes user-defined build commands
+- Clones repository at commit SHA
+- Executes build commands
 - Packages artifacts
-- Tags artifacts with commit SHA and timestamp
-- Uploads artifacts to S3
+- Tags with commit SHA and timestamp
+- Uploads to S3
 
 ### 3. Pipeline Deployment Stage
 - Synthesizes Pipeline CDK Stack
-- Deploys Pipeline CDK Stack (if changes exist)
-- Reads `aphex-config.yaml`
-- Generates updated WorkflowTemplate
-- Applies WorkflowTemplate to Argo (self-modification)
+- Deploys pipeline updates
+- Reads configuration
+- Generates WorkflowTemplate
+- Applies to Argo (self-modification)
 
-### 4. Environment Stages (per environment)
+### 4. Environment Stages
 - Downloads artifacts from S3
-- Sets AWS region and account context
-- Assumes cross-account role (if needed)
-- Synthesizes Application CDK Stacks just-in-time
-- Deploys stacks in configured order
+- Sets AWS context (region, account)
+- Assumes cross-account role if needed
+- Synthesizes CDK stacks just-in-time
+- Deploys in configured order
 - Captures stack outputs
-- Executes post-deployment tests (optional)
+- Runs tests if configured
+
+**Source**
+- `pipeline-scripts/validation_stage.py`
+- `pipeline-scripts/build_stage.py`
+- `pipeline-scripts/pipeline_deployment_stage.py`
+- `pipeline-scripts/environment_deployment_stage.py`
 
 ## Getting Started
 
 ### Prerequisites
-- AWS account with appropriate permissions
-- AWS CLI configured
-- Node.js 18+ and npm
-- Python 3.9+
-- AWS CDK CLI
-- kubectl
-- GitHub repository with admin access
+
+1. **Existing cluster** deployed via `arbiter-pipeline-infrastructure`
+2. **AWS CLI** configured with credentials
+3. **CDK CLI** installed (`npm install -g aws-cdk`)
+4. **kubectl** configured for cluster access
+5. **GitHub repository** with admin access
+6. **GitHub token** stored in AWS Secrets Manager
 
 ### Quick Setup
 
-1. **Install dependencies**:
+1. **Install package**:
    ```bash
-   cd pipeline-infra && npm install
-   cd ../pipeline-scripts && pip install -r requirements.txt
+   npm install aphex-pipeline
    ```
 
-2. **Configure pipeline** in `aphex-config.yaml`:
-   ```yaml
-   version: "1.0"
-   build:
-     commands: [npm install, npm run build]
-   environments:
-     - name: dev
-       region: us-east-1
-       account: "123456789012"
-       stacks:
-         - name: MyAppStack
-           path: lib/my-app-stack.ts
+2. **Create pipeline**:
+   ```typescript
+   import { AphexPipeline } from 'aphex-pipeline';
+   
+   new AphexPipeline(this, 'Pipeline', {
+     clusterName: 'company-pipelines',
+     githubOwner: 'my-org',
+     githubRepo: 'my-app',
+     githubTokenSecretName: 'github-token',
+     stacks: [...],
+     environments: [...],
+   });
    ```
 
-3. **Bootstrap AWS accounts**:
+3. **Deploy**:
    ```bash
-   cdk bootstrap aws://ACCOUNT/REGION
+   cdk deploy
    ```
 
-4. **Deploy pipeline infrastructure**:
-   ```bash
-   cd pipeline-infra
-   cdk deploy AphexPipelineStack
-   ```
+4. **Configure GitHub webhook** with URL from outputs
 
-5. **Configure GitHub webhook** with URL from CDK outputs
+5. **Push to trigger** first workflow
 
-6. **Push to trigger** your first workflow
+**Source**
+- `pipeline-infra/examples/single-pipeline-example.ts`
+- `pipeline-infra/examples/README.md`
 
 ## Configuration
 
-The `aphex-config.yaml` file defines:
-- **Build commands**: Commands to execute in build stage
-- **Environments**: List of deployment targets
-  - Name, AWS region, AWS account
-  - CDK stacks to deploy (in order)
-  - Optional post-deployment tests
+### Stack Definitions
 
-Configuration is validated against `aphex-config.schema.json` before execution.
+Define CDK stacks to deploy:
+
+```typescript
+stacks: [
+  { 
+    name: 'DatabaseStack', 
+    path: 'lib/database-stack.ts' 
+  },
+  { 
+    name: 'ApiStack', 
+    path: 'lib/api-stack.ts',
+    dependsOn: ['DatabaseStack']  // Optional dependencies
+  },
+]
+```
+
+### Environment Definitions
+
+Define deployment targets:
+
+```typescript
+environments: [
+  {
+    name: 'dev',
+    account: '111111111111',
+    region: 'us-east-1',
+    stacks: ['DatabaseStack', 'ApiStack'],
+  },
+  {
+    name: 'prod',
+    account: '222222222222',
+    region: 'us-west-2',
+    stacks: ['DatabaseStack', 'ApiStack'],
+    tests: {
+      commands: ['npm run integration-test'],
+    },
+  },
+]
+```
+
+**Source**
+- `.kiro/docs/api.md` (interface definitions)
 
 ## Use Cases
 
-AphexPipeline is ideal for:
-- **Multi-environment deployments**: Dev, staging, prod with different configurations
-- **Multi-account deployments**: Separate AWS accounts for different environments
-- **Multi-region deployments**: Deploy to multiple regions for HA/DR
-- **Microservices**: Deploy multiple services with dependencies
-- **Data pipelines**: Deploy ETL infrastructure with proper ordering
-- **Serverless applications**: Deploy Lambda, API Gateway, DynamoDB, etc.
+### Multi-Environment Deployments
+Deploy to dev, staging, and prod with different configurations and accounts.
 
-## Property-Based Testing
+### Multi-Region Deployments
+Deploy to multiple AWS regions for high availability and disaster recovery.
 
-AphexPipeline uses property-based testing to verify correctness:
-- **25 correctness properties** defined in design document
-- **Hypothesis** library for Python property-based testing
-- **100+ examples per property** for extensive coverage
-- Properties validate universal behaviors across all inputs
+### Microservices
+Deploy multiple services with proper dependency ordering.
+
+### Serverless Applications
+Deploy Lambda functions, API Gateway, DynamoDB, and other serverless resources.
+
+### Data Pipelines
+Deploy ETL infrastructure with proper sequencing.
+
+**Source**
+- `.kiro/docs/example-use-cases.md`
+
+## Multi-Pipeline Scenarios
+
+Multiple application teams can deploy pipelines to the same cluster:
+
+```typescript
+// Team A
+new AphexPipeline(app, 'FrontendPipeline', {
+  clusterName: 'company-pipelines',
+  workflowTemplateName: 'frontend-pipeline',
+  // ...
+});
+
+// Team B
+new AphexPipeline(app, 'BackendPipeline', {
+  clusterName: 'company-pipelines',
+  workflowTemplateName: 'backend-pipeline',
+  // ...
+});
+```
+
+Each pipeline has:
+- Unique WorkflowTemplate name
+- Unique EventSource and Sensor
+- Separate ServiceAccount with IRSA
+- Separate S3 bucket
+
+**Source**
+- `pipeline-infra/examples/multi-pipeline-example.ts`
+
+## Security
+
+### IRSA (IAM Roles for Service Accounts)
+
+Workflows authenticate to AWS using IRSA:
+- No long-lived credentials
+- Kubernetes ServiceAccount linked to IAM role
+- Automatic credential rotation
+- Least-privilege permissions
+
+### Cross-Account Deployment
+
+Deploy to different AWS accounts:
+- Assume cross-account IAM roles
+- Follows AWS security best practices
+- Supports CDK bootstrap pattern
+
+**Source**
+- `pipeline-infra/lib/aphex-pipeline-stack.ts` (IRSA configuration)
+- `.kiro/docs/operations.md` (security procedures)
 
 ## Documentation Structure
 
-- **[README.md](../../README.md)**: Quick start and overview
-- **[Architecture](architecture.md)**: Detailed system architecture with diagrams
-- **[Operations](operations.md)**: Monitoring, troubleshooting, maintenance
-- **[API Documentation](api.md)**: Python module APIs
-- **[Data Models](data-models.md)**: Configuration and metadata structures
-- **[FAQ](faq.md)**: Common questions and answers
+- **[Architecture](architecture.md)**: System design and components
+- **[Operations](operations.md)**: Deployment, monitoring, troubleshooting
+- **[API Reference](api.md)**: Construct interfaces and properties
+- **[Data Models](data-models.md)**: Configuration structures
+- **[FAQ](faq.md)**: Common questions
 - **[Example Use Cases](example-use-cases.md)**: Real-world scenarios
-- **[Requirements](../.kiro/specs/aphex-pipeline/requirements.md)**: Feature requirements
-- **[Design](../.kiro/specs/aphex-pipeline/design.md)**: System design and properties
-- **[Tasks](../.kiro/specs/aphex-pipeline/tasks.md)**: Implementation task list
 
 ## Archon Integration
 
-This repository's documentation is ingested by the Archon RAG system from the `.kiro/docs/` directory. The documentation follows the Archon documentation contract to ensure accurate retrieval and grounding in code.
+This repository participates in the Archon RAG system. Documentation in `.kiro/docs/` is ingested for retrieval and follows the Archon documentation contract defined in `CLAUDE.md`.
 
-## Source References
+## Source Code
 
-- **Pipeline Infrastructure**: `pipeline-infra/lib/aphex-pipeline-stack.ts`
-- **Pipeline Scripts**: `pipeline-scripts/*.py`
-- **Configuration Schema**: `aphex-config.schema.json`
-- **Argo Configuration**: `.argo/*.yaml`
-- **Container Images**: `containers/builder/`, `containers/deployer/`
-- **Tests**: `pipeline-scripts/tests/*.py`, `pipeline-infra/test/*.ts`
+- **CDK Construct**: `pipeline-infra/lib/aphex-pipeline-stack.ts`
+- **WorkflowTemplate Generator**: `pipeline-infra/lib/workflow-template-generator.ts`
+- **Configuration Parser**: `pipeline-infra/lib/config-parser.ts`
+- **Examples**: `pipeline-infra/examples/*.ts`
+- **Tests**: `pipeline-infra/test/*.ts`
 
 ## Contributing
 

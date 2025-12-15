@@ -14,16 +14,33 @@ new AphexPipelineStack(app, 'AphexPipelineStack', {
   },
   description: 'AphexPipeline - Self-modifying CDK deployment platform',
   
-  // Required parameters - customize for your repository
-  githubOwner: process.env.GITHUB_OWNER || 'bdchatham',
+  // ===== Required Parameters =====
+  // Customize for your GitHub repository
+  githubOwner: process.env.GITHUB_OWNER || 'my-org',
   githubRepo: process.env.GITHUB_REPO || 'my-repo',
   githubTokenSecretName: process.env.GITHUB_TOKEN_SECRET || 'github-token',
   
-  // Optional parameters with sensible defaults
+  // ===== Cluster Reference =====
+  // The pipeline references an existing EKS cluster via CloudFormation exports
+  // Specify the name of the cluster deployed via arbiter-pipeline-infrastructure
+  clusterName: process.env.CLUSTER_NAME || 'my-company-pipelines',
+  
+  // ===== Optional Parameters =====
   githubBranch: process.env.GITHUB_BRANCH || 'main',
-  clusterName: process.env.CLUSTER_NAME,
+  
+  // Argo namespaces (defaults: 'argo' and 'argo-events')
+  // These should match the namespaces used by your cluster setup
   argoNamespace: process.env.ARGO_NAMESPACE,
   argoEventsNamespace: process.env.ARGO_EVENTS_NAMESPACE,
+  
+  // Artifact storage configuration
+  // artifactBucketName: 'my-custom-artifacts-bucket',
+  // artifactRetentionDays: 90,
+  
+  // Pipeline naming (useful for multiple pipelines on same cluster)
+  // workflowTemplateName: 'my-app-pipeline-template',
+  // eventSourceName: 'my-app-github',
+  // sensorName: 'my-app-pipeline-sensor',
 });
 
 app.synth();

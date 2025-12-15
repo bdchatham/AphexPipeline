@@ -1,52 +1,131 @@
 # Implementation Plan
 
+## Refactoring: Cluster Separation
+
+This plan focuses on refactoring AphexPipeline to reference an existing EKS cluster instead of creating one. The cluster infrastructure will be managed by a separate aphex-cluster package.
+
+- [x] 1. Refactor Pipeline CDK Stack to reference existing cluster
+- [x] 1.1 Update AphexPipelineStackProps interface
+  - Make cluster reference optional (defaults to CloudFormation export lookup by naming convention)
+  - Add optional `clusterExportName` parameter (defaults to "AphexCluster-ClusterName")
+  - Remove cluster creation parameters (clusterVersion, nodeInstanceTypes, minNodes, maxNodes, desiredNodes)
+  - Remove VPC parameter (cluster manages its own VPC)
+  - Keep pipeline-specific parameters (GitHub config, artifact bucket, namespaces)
+  - _Requirements: 10.1, 14.1_
+
+- [x] 1.2 Replace cluster creation with cluster import via CloudFormation exports
+  - Remove `new eks.Cluster()` code
+  - Use `Fn.importValue()` to reference cluster name from CloudFormation export (e.g., "AphexClusterName")
+  - Use `eks.Cluster.fromClusterAttributes()` with imported cluster name
+  - Follow naming convention for exports (e.g., "AphexCluster-ClusterName", "AphexCluster-SecurityGroupId")
+  - Verify cluster exists and is accessible
+  - _Requirements: 10.1, 14.2_
+
+- [x] 1.3 Remove Argo Workflows and Argo Events installation
+  - Remove Helm chart installations (these are now in aphex-cluster)
+  - Remove namespace creation for argo and argo-events (assume they exist)
+  - Remove EventBus creation (assume it exists)
+  - Add verification that Argo components are installed
+  - _Requirements: 10.2_
+
+- [x] 1.4 Remove VPC creation
+  - Remove VPC construct (cluster manages its own VPC)
+  - Remove kubectl layer creation (cluster provides this)
+  - _Requirements: 10.1_
+
+- [x] 1.5 Update service account creation
+  - Keep pipeline-specific service account creation
+  - Ensure service account is created in correct namespace
+  - Maintain IRSA configuration
+  - _Requirements: 10.4_
+
+- [x] 1.6 Keep S3 bucket creation (pipeline-specific)
+  - S3 bucket remains pipeline-specific
+  - No changes needed to bucket configuration
+  - _Requirements: 7.4_
+
+- [x] 1.7 Update CDK Stack outputs
+  - Remove cluster-related outputs (cluster name, cluster ARN, VPC ID)
+  - Keep pipeline-specific outputs (webhook URL, artifact bucket, workflow execution role)
+  - Add WorkflowTemplate name output
+  - _Requirements: 10.5_
+
+- [x] 1.8 Update unit tests for refactored stack
+  - Remove tests for cluster creation
+  - Add tests for cluster import
+  - Test that stack doesn't modify cluster resources
+  - Test pipeline-specific resource creation
+  - _Requirements: 10.1-10.5_
+
+- [x] 2. Update WorkflowTemplate generator
+- [x] 2.1 Update pipeline deployment stage
+  - Remove cluster modification logic
+  - Focus on pipeline-specific resource updates
+  - Ensure WorkflowTemplate updates don't interrupt running workflows
+  - _Requirements: 3.3, 3.7, 3.8_
+
+- [x] 2.2 Add cluster verification step
+  - Verify Argo Workflows is installed and accessible
+  - Verify Argo Events is installed and accessible
+  - Fail fast if cluster prerequisites are not met
+  - _Requirements: 10.2_
+
+- [x] 3. Update documentation
+- [x] 3.1 Update README
+  - Add cluster prerequisites section
+  - Update quick start to reference aphex-cluster package
+  - Update library usage examples with cluster reference
+  - _Requirements: All_
+
+- [x] 3.2 Update architecture documentation
+  - Update architecture diagrams to show cluster separation
+  - Document cluster requirements
+  - Document multi-tenancy support
+  - _Requirements: All_
+
+- [x] 3.3 Update bootstrap documentation
+  - Update bootstrap process to assume cluster exists
+  - Add cluster verification steps
+  - Remove cluster creation steps
+  - _Requirements: 11.1, 11.2_
+
+- [x] 3.4 Add troubleshooting for cluster issues
+  - Add section on cluster access problems
+  - Add section on multi-pipeline interference
+  - Add section on cluster prerequisite verification
+  - _Requirements: All_
+
+- [x] 4. Add property tests for cluster isolation
+- [x] 4.1 Write property test for cluster resource isolation
+  - **Property 26: Cluster resource isolation**
+  - **Validates: Requirements 14.4**
+
+- [x] 4.2 Write property test for pipeline destruction cleanup
+  - **Property 27: Pipeline destruction cleanup**
+  - **Validates: Requirements 14.5**
+
+- [x] 5. Update example configurations
+- [x] 5.1 Update example CDK app
+  - Show how to reference existing cluster
+  - Update props with cluster name
+  - Remove cluster creation code
+  - _Requirements: 14.1_
+
+- [x] 5.2 Create multi-pipeline example
+  - Show multiple pipelines sharing same cluster
+  - Demonstrate resource isolation
+  - Show unique naming conventions
+  - _Requirements: 14.3_
+
+## Previously Completed Tasks
+
+The following tasks were completed in the original implementation and do not require changes for the cluster separation refactoring:
+
 - [x] 1. Set up project structure and core infrastructure
   - Create directory structure for pipeline-infra, scripts, and configuration
   - Initialize CDK project for Pipeline CDK Stack
   - Set up TypeScript/Python tooling and dependencies
   - _Requirements: 10.1, 11.1_
-
-- [x] 2. Implement Pipeline CDK Stack for EKS cluster
-- [x] 2.1 Create EKS cluster construct
-  - Define EKS cluster with appropriate node groups
-  - Configure VPC and networking for cluster
-  - Set up cluster autoscaling
-  - _Requirements: 10.1_
-
-- [x] 2.2 Add Argo Workflows installation via Helm
-  - Create Helm chart resource for Argo Workflows
-  - Configure Argo Workflows namespace and RBAC
-  - Set up Argo Workflows UI ingress
-  - _Requirements: 10.2_
-
-- [x] 2.3 Add Argo Events installation via Helm
-  - Create Helm chart resource for Argo Events
-  - Configure Argo Events namespace and RBAC
-  - Set up EventBus and webhook endpoint
-  - _Requirements: 10.2_
-
-- [x] 2.4 Configure IRSA for AWS access
-  - Create IAM role for workflow execution
-  - Set up IRSA trust relationship with EKS
-  - Add policies for S3, CloudFormation, IAM access
-  - _Requirements: 7.1, 10.3_
-
-- [x] 2.5 Create S3 bucket for artifacts
-  - Define S3 bucket with encryption enabled
-  - Enable versioning on bucket
-  - Set up lifecycle policies for artifact cleanup
-  - _Requirements: 7.4_
-
-- [x] 2.6 Add CDK Stack outputs
-  - Output cluster name, Argo URLs, S3 bucket name
-  - Output IAM role ARNs for reference
-  - _Requirements: 10.5_
-
-- [x] 2.7 Write unit tests for Pipeline CDK Stack
-  - Test EKS cluster configuration
-  - Test IAM role policies
-  - Test S3 bucket encryption and versioning
-  - _Requirements: 10.1-10.5_
 
 - [x] 3. Create configuration schema and validation
 - [x] 3.1 Define JSON schema for aphex-config.yaml

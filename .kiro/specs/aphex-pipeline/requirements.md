@@ -2,12 +2,16 @@
 
 ## Introduction
 
-This document specifies the requirements for AphexPipeline, a generic self-modifying CDK deployment platform built on Amazon EKS, Argo Workflows, and Argo Events. AphexPipeline operates as a traditional CI/CD pipeline that synthesizes and deploys CDK infrastructure just-in-time at each stage, with the unique capability to dynamically alter its own workflow topology based on configuration changes. The platform is application-agnostic and designed to be reusable across different projects and teams. After an initial manual bootstrap deployment, AphexPipeline becomes self-managing and can deploy CDK stacks to multiple environments across different AWS regions and accounts.
+This document specifies the requirements for AphexPipeline, a generic self-modifying CDK deployment platform built on Amazon EKS, Argo Workflows, and Argo Events. AphexPipeline operates as a traditional CI/CD pipeline that synthesizes and deploys CDK infrastructure just-in-time at each stage, with the unique capability to dynamically alter its own workflow topology based on configuration changes. The platform is application-agnostic and designed to be reusable across different projects and teams.
+
+AphexPipeline is designed to run on an existing EKS cluster that has Argo Workflows and Argo Events pre-installed. The cluster infrastructure is managed separately (via the aphex-cluster package) and can be shared across multiple pipeline instances. After an initial manual bootstrap deployment, AphexPipeline becomes self-managing and can deploy CDK stacks to multiple environments across different AWS regions and accounts.
 
 ## Glossary
 
-- **AphexPipeline**: The self-modifying CDK deployment platform consisting of EKS cluster, Argo Workflows, Argo Events, and pipeline logic
-- **Pipeline CDK Stack**: The CDK stack that defines the AphexPipeline infrastructure (EKS cluster, Argo Workflows, Argo Events, IAM roles)
+- **AphexPipeline**: The self-modifying CDK deployment platform that configures pipeline-specific resources on an existing EKS cluster with Argo Workflows and Argo Events
+- **AphexCluster**: The separate EKS cluster infrastructure (managed by aphex-cluster package) that hosts Argo Workflows and Argo Events, shared across multiple pipeline instances
+- **Pipeline CDK Stack**: The CDK stack that defines pipeline-specific resources (WorkflowTemplate, EventSource, Sensor, service accounts, S3 buckets)
+- **Cluster CDK Stack**: The CDK stack that defines the shared EKS cluster infrastructure (managed separately, not part of this package)
 - **Application CDK Stack**: Any CDK stack that AphexPipeline deploys (user-defined infrastructure)
 - **Workflow**: An Argo Workflows workflow instance that executes pipeline steps
 - **WorkflowTemplate**: An Argo Workflows template that defines the pipeline topology and is applied to the cluster
@@ -20,7 +24,7 @@ This document specifies the requirements for AphexPipeline, a generic self-modif
 - **Just-in-Time Synthesis**: The approach of synthesizing CDK stacks at each stage right before deploying them
 - **IRSA**: IAM Roles for Service Accounts, allowing Kubernetes pods to assume AWS IAM roles
 - **Argo Events**: The event-driven workflow automation framework that triggers workflows based on GitHub events
-- **Bootstrap**: The initial manual deployment of AphexPipeline infrastructure
+- **Bootstrap**: The initial manual deployment of AphexPipeline infrastructure to an existing cluster
 - **Self-Modification**: The ability of AphexPipeline to update its own WorkflowTemplate topology based on configuration changes
 
 ## Requirements
@@ -57,11 +61,12 @@ This document specifies the requirements for AphexPipeline, a generic self-modif
 
 1. WHEN the build stage completes, THEN AphexPipeline SHALL execute the pipeline deployment stage
 2. WHEN the pipeline deployment stage executes, THEN AphexPipeline SHALL synthesize the Pipeline CDK Stack just-in-time
-3. WHEN the Pipeline CDK Stack is synthesized, THEN AphexPipeline SHALL deploy it to update the EKS cluster infrastructure if changes exist
+3. WHEN the Pipeline CDK Stack is synthesized, THEN AphexPipeline SHALL deploy it to update pipeline-specific resources without modifying the shared cluster infrastructure
 4. WHEN the Pipeline CDK Stack deployment completes, THEN AphexPipeline SHALL read the environment configuration file
 5. WHEN the environment configuration is read, THEN AphexPipeline SHALL generate an updated WorkflowTemplate with stages for each configured environment
 6. WHEN the new WorkflowTemplate is generated, THEN AphexPipeline SHALL apply it directly to the Argo Workflows server using kubectl
-7. WHEN the pipeline deployment stage completes, THEN AphexPipeline SHALL make the updated workflow topology visible in subsequent workflow runs
+7. WHEN a WorkflowTemplate is updated, THEN AphexPipeline SHALL not interrupt or terminate currently running workflow instances
+8. WHEN the pipeline deployment stage completes, THEN AphexPipeline SHALL make the updated workflow topology visible only in subsequent workflow runs
 
 ### Requirement 4
 
@@ -137,15 +142,15 @@ This document specifies the requirements for AphexPipeline, a generic self-modif
 
 ### Requirement 10
 
-**User Story:** As a platform engineer, I want the Pipeline CDK Stack to be defined in code, so that AphexPipeline infrastructure is version-controlled and reproducible.
+**User Story:** As a platform engineer, I want the Pipeline CDK Stack to reference an existing cluster, so that multiple pipelines can share infrastructure without library dependencies.
 
 #### Acceptance Criteria
 
-1. WHEN provisioning AphexPipeline, THEN the System SHALL define the EKS cluster using AWS CDK
-2. WHEN the EKS cluster is created, THEN the System SHALL install Argo Workflows and Argo Events using Helm charts
-3. WHEN Argo Workflows and Argo Events are installed, THEN the System SHALL configure IRSA for AWS access
-4. WHEN the Pipeline CDK Stack is deployed, THEN the System SHALL create necessary IAM roles and policies for CDK deployments
-5. WHEN the Pipeline CDK Stack is deployed, THEN the System SHALL output the Argo Workflows UI URL, Argo Events configuration, and access instructions
+1. WHEN provisioning AphexPipeline, THEN the System SHALL discover an existing EKS cluster via CloudFormation exports using the cluster name
+2. WHEN the Pipeline CDK Stack is deployed, THEN the System SHALL verify that required CloudFormation exports exist for cluster discovery
+3. WHEN the Pipeline CDK Stack is deployed, THEN the System SHALL create pipeline-specific resources without modifying cluster-level resources
+4. WHEN the Pipeline CDK Stack is deployed, THEN the System SHALL create necessary IAM roles and service accounts with IRSA for workflow execution
+5. WHEN the Pipeline CDK Stack is deployed, THEN the System SHALL output the pipeline-specific webhook URL, artifact bucket name, and workflow execution role ARN
 
 ### Requirement 11
 
@@ -153,11 +158,11 @@ This document specifies the requirements for AphexPipeline, a generic self-modif
 
 #### Acceptance Criteria
 
-1. WHEN bootstrapping AphexPipeline, THEN the System SHALL provide a script that deploys the Pipeline CDK Stack manually
-2. WHEN the bootstrap script executes, THEN the System SHALL create the EKS cluster and install Argo Workflows and Argo Events
+1. WHEN bootstrapping AphexPipeline, THEN the System SHALL provide a script that deploys the Pipeline CDK Stack manually to an existing cluster
+2. WHEN the bootstrap script executes, THEN the System SHALL validate that the target cluster exists and is accessible
 3. WHEN the bootstrap completes, THEN the System SHALL deploy the initial WorkflowTemplate and Argo Events configuration to the cluster
 4. WHEN the bootstrap completes, THEN the System SHALL configure GitHub webhook integration for Argo Events
-5. WHEN the bootstrap completes, THEN the System SHALL output instructions for accessing the Argo UI and verifying webhook configuration
+5. WHEN the bootstrap completes, THEN the System SHALL output instructions for configuring the GitHub webhook and accessing pipeline-specific resources
 
 ### Requirement 12
 
@@ -182,3 +187,27 @@ This document specifies the requirements for AphexPipeline, a generic self-modif
 3. WHEN defining CDK stacks, THEN AphexPipeline SHALL deploy any CDK stack without knowledge of its contents
 4. WHEN defining environments, THEN AphexPipeline SHALL support any AWS region and account combination
 5. WHEN extending AphexPipeline, THEN the System SHALL provide hooks for custom pre-deployment and post-deployment logic
+
+### Requirement 14
+
+**User Story:** As a platform engineer, I want AphexPipeline to reference an existing EKS cluster, so that multiple pipelines can share cluster infrastructure and reduce costs.
+
+#### Acceptance Criteria
+
+1. WHEN creating an AphexPipeline instance, THEN the System SHALL accept an existing EKS cluster name as a required parameter
+2. WHEN the cluster name is provided, THEN the System SHALL import the cluster using CloudFormation exports without requiring a library dependency
+3. WHEN multiple pipeline instances reference the same cluster, THEN the System SHALL isolate pipeline resources using unique naming conventions
+4. WHEN deploying pipeline resources, THEN the System SHALL not modify or delete cluster-level resources shared by other pipelines
+5. WHEN a pipeline is destroyed, THEN the System SHALL remove only pipeline-specific resources and leave the cluster intact
+
+### Requirement 15
+
+**User Story:** As an application developer, I want the pipeline to use stable container images by default, so that I don't need to manage image versions.
+
+#### Acceptance Criteria
+
+1. WHEN generating WorkflowTemplates, THEN the System SHALL reference container images with the `:latest` tag by default
+2. WHEN container images are not specified, THEN the System SHALL use published images from `public.ecr.aws/aphex/*`
+3. WHEN a user provides custom image URLs, THEN the System SHALL use those instead of defaults
+4. WHEN container images are referenced, THEN the System SHALL support both `:latest` tags and explicit version tags
+5. WHEN the platform team publishes new images, THEN existing pipelines SHALL automatically use the new images on next workflow execution

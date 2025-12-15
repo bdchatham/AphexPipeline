@@ -63,12 +63,34 @@ AphexPipeline is a generic, reusable CI/CD platform that provides automated infr
 
 ## Prerequisites
 
-- **AWS Account**: With appropriate permissions for EKS, S3, CloudFormation, IAM
+### Cluster Prerequisites
+
+AphexPipeline requires an existing EKS cluster with Argo Workflows and Argo Events pre-installed. The cluster infrastructure is managed separately using the **aphex-cluster** package.
+
+**Required cluster components:**
+- EKS cluster (Kubernetes 1.28+)
+- Argo Workflows (v3.4+) installed and running
+- Argo Events (v1.7+) installed and running
+- EventBus deployed (typically named "default")
+- Cluster accessible via kubectl
+
+**To set up the cluster infrastructure:**
+```bash
+# Install the aphex-cluster package
+npm install @bdchatham/aphex-cluster
+
+# Deploy the cluster
+# See aphex-cluster documentation for details
+```
+
+### Development Prerequisites
+
+- **AWS Account**: With appropriate permissions for S3, CloudFormation, IAM
 - **AWS CLI**: Configured with credentials (`aws configure`)
 - **Node.js**: 18+ and npm
 - **Python**: 3.9+
 - **AWS CDK CLI**: `npm install -g aws-cdk`
-- **kubectl**: For EKS cluster management
+- **kubectl**: For cluster access and verification
 - **GitHub Repository**: With admin access for webhook configuration
 
 ## Using as a Library
@@ -77,24 +99,36 @@ AphexPipeline is designed to be imported into your own CDK project as a reusable
 
 ### Quick Start
 
-1. **Install the package**:
+1. **Set up the cluster infrastructure** (one-time setup):
+   ```bash
+   # Install aphex-cluster package
+   npm install @bdchatham/aphex-cluster
+   
+   # Deploy the cluster (see aphex-cluster documentation)
+   # This creates EKS cluster with Argo Workflows and Argo Events
+   ```
+
+2. **Install the pipeline package**:
    ```bash
    npm install @bdchatham/aphex-pipeline
    ```
 
-2. **Create a GitHub token secret in AWS Secrets Manager**:
+3. **Create a GitHub token secret in AWS Secrets Manager**:
    ```bash
    aws secretsmanager create-secret \
      --name github-token \
      --secret-string '{"token":"ghp_your_token_here"}'
    ```
 
-3. **Import and use in your CDK app**:
+4. **Import and use in your CDK app**:
    ```typescript
    import { AphexPipelineStack } from 'aphex-pipeline';
    
    new AphexPipelineStack(app, 'MyPipeline', {
      env: { account: '123456789012', region: 'us-east-1' },
+     
+     // Optional: Reference existing cluster (defaults to CloudFormation export lookup)
+     clusterExportName: 'AphexCluster-ClusterName',  // Default value
      
      // Required: GitHub configuration
      githubOwner: 'my-org',
@@ -103,34 +137,34 @@ AphexPipeline is designed to be imported into your own CDK project as a reusable
      
      // Optional: customize as needed
      githubBranch: 'main',
-     clusterName: 'my-pipeline',
-     minNodes: 3,
-     maxNodes: 20,
    });
    ```
 
-4. **Deploy**:
+5. **Deploy**:
    ```bash
    cdk deploy MyPipeline
    ```
 
-5. **Configure GitHub webhook** using the URL from stack outputs
+6. **Configure GitHub webhook** using the URL from stack outputs
 
 That's it! The construct handles everything:
-- Creates EKS cluster with Argo Workflows and Argo Events
-- Configures GitHub EventSource and Sensor
+- References existing EKS cluster with Argo Workflows and Argo Events
+- Creates pipeline-specific resources (WorkflowTemplate, EventSource, Sensor)
+- Configures GitHub webhook integration
 - Sets up logging and monitoring
-- Creates IAM roles and S3 buckets
-- Deploys all Kubernetes manifests
+- Creates IAM roles and S3 buckets for the pipeline
+- Deploys all pipeline-specific Kubernetes manifests
+
+**Multiple pipelines can share the same cluster**, each with isolated resources.
 
 See the [Library Usage Guide](.kiro/docs/library-usage.md) for detailed instructions on:
 
 - Installation options (NPM, git submodule, local path)
 - Advanced configuration and customization
-- Using with existing VPC or EKS cluster
+- Referencing existing clusters
 - Custom container images and templates
 - Extending the stack with custom resources
-- Managing multiple pipelines
+- Managing multiple pipelines on shared cluster
 - Testing your integration
 
 **Quick example**:
@@ -140,6 +174,10 @@ import { AphexPipelineStack } from 'aphex-pipeline';
 
 new AphexPipelineStack(app, 'MyPipeline', {
   env: { account: '123456789012', region: 'us-east-1' },
+  
+  // Optional: cluster reference (defaults to CloudFormation export)
+  clusterExportName: 'AphexCluster-ClusterName',
+  
   githubOwner: 'bdchatham',
   githubRepo: 'my-repo',
   githubTokenSecretName: 'github-token',
@@ -194,7 +232,33 @@ environments:
         path: lib/my-app-stack.ts
 ```
 
-### 3. Bootstrap AWS Accounts
+### 3. Verify Cluster Prerequisites
+
+Before deploying the pipeline, ensure the cluster is ready:
+
+```bash
+# Verify cluster access
+kubectl cluster-info
+
+# Verify Argo Workflows is installed
+kubectl get pods -n argo
+kubectl get workflowtemplate -n argo
+
+# Verify Argo Events is installed
+kubectl get pods -n argo-events
+kubectl get eventbus -n argo-events
+
+# Verify cluster exports (if using CloudFormation export lookup)
+aws cloudformation list-exports | grep AphexCluster
+```
+
+If the cluster is not set up, install the aphex-cluster package first:
+```bash
+npm install @bdchatham/aphex-cluster
+# Follow aphex-cluster documentation to deploy cluster
+```
+
+### 4. Bootstrap AWS Accounts
 
 Bootstrap the pipeline account and any target accounts:
 
@@ -208,7 +272,7 @@ cdk bootstrap aws://TARGET_ACCOUNT/TARGET_REGION \
   --cloudformation-execution-policies 'arn:aws:iam::aws:policy/AdministratorAccess'
 ```
 
-### 4. Deploy Pipeline Infrastructure
+### 5. Deploy Pipeline Infrastructure
 
 ```bash
 cd pipeline-infra
@@ -216,7 +280,9 @@ cdk synth AphexPipelineStack
 cdk deploy AphexPipelineStack
 ```
 
-### 5. Configure GitHub Webhook
+The pipeline will reference the existing cluster and create pipeline-specific resources.
+
+### 6. Configure GitHub Webhook
 
 1. Get the webhook URL from CDK outputs
 2. Go to your GitHub repository → Settings → Webhooks
@@ -226,7 +292,7 @@ cdk deploy AphexPipelineStack
    - **Events**: Push events, Pull request events
    - **Active**: ✓
 
-### 6. Trigger Your First Workflow
+### 7. Trigger Your First Workflow
 
 ```bash
 git commit --allow-empty -m "Trigger first workflow"
@@ -404,12 +470,21 @@ Common issues:
 
 AphexPipeline consists of:
 
+### Shared Cluster Infrastructure (managed by aphex-cluster)
 - **EKS Cluster**: Runs Argo Workflows and Argo Events
-- **Argo Workflows**: Orchestrates pipeline stages
-- **Argo Events**: Receives GitHub webhooks and triggers workflows
+- **Argo Workflows**: Orchestrates pipeline stages (shared)
+- **Argo Events**: Receives GitHub webhooks and triggers workflows (shared)
+
+### Pipeline-Specific Resources (managed by AphexPipeline)
+- **WorkflowTemplate**: Defines pipeline topology
+- **EventSource**: Pipeline-specific GitHub webhook receiver
+- **Sensor**: Pipeline-specific workflow trigger
 - **S3 Bucket**: Stores build artifacts
 - **IAM Roles**: IRSA for workflow execution, cross-account roles
+- **Service Account**: Pipeline-specific Kubernetes service account
 - **CloudWatch**: Logging and monitoring
+
+**Multi-Tenancy**: Multiple pipeline instances can share the same cluster infrastructure, with each pipeline having isolated resources.
 
 See [Architecture Documentation](.kiro/docs/architecture.md) for detailed diagrams and component descriptions.
 

@@ -1,7 +1,7 @@
 {
   "name": "@bdchatham/aphex-pipeline",
   "version": "1.0.0",
-  "description": "Self-modifying CDK deployment platform built on EKS, Argo Workflows, and Argo Events",
+  "description": "CDK construct for generating Argo WorkflowTemplates that deploy CDK applications",
   "main": "dist/lib/index.js",
   "types": "dist/lib/index.d.ts",
   "scripts": {

@@ -7,11 +7,24 @@ export class WorkflowTemplateGenerator {
   private config: AphexConfig;
   private artifactBucketName: string;
   private serviceAccountName: string;
+  private builderImage: string;
+  private deployerImage: string;
+  private workflowExecutionRoleArn: string;
 
-  constructor(config: AphexConfig, artifactBucketName: string, serviceAccountName: string = 'workflow-executor') {
+  constructor(
+    config: AphexConfig,
+    artifactBucketName: string,
+    serviceAccountName: string = 'workflow-executor',
+    builderImage: string = 'public.ecr.aws/aphex/builder:latest',
+    deployerImage: string = 'public.ecr.aws/aphex/deployer:latest',
+    workflowExecutionRoleArn?: string
+  ) {
     this.config = config;
     this.artifactBucketName = artifactBucketName;
     this.serviceAccountName = serviceAccountName;
+    this.builderImage = builderImage;
+    this.deployerImage = deployerImage;
+    this.workflowExecutionRoleArn = workflowExecutionRoleArn || '';
   }
 
   /**
@@ -83,7 +96,7 @@ export class WorkflowTemplateGenerator {
         ],
       },
       container: {
-        image: 'aphex-pipeline/builder:latest',
+        image: this.builderImage,
         command: ['/bin/bash'],
         args: [
           '-c',
@@ -109,6 +122,14 @@ export class WorkflowTemplateGenerator {
         ],
         env: [
           {
+            name: 'AWS_ROLE_ARN',
+            value: this.workflowExecutionRoleArn,
+          },
+          {
+            name: 'AWS_WEB_IDENTITY_TOKEN_FILE',
+            value: '/var/run/secrets/eks.amazonaws.com/serviceaccount/token',
+          },
+          {
             name: 'ARTIFACT_BUCKET',
             value: this.artifactBucketName,
           },
@@ -125,6 +146,16 @@ export class WorkflowTemplateGenerator {
 
   /**
    * Generate the pipeline deployment stage template.
+   * 
+   * This stage updates pipeline-specific resources only:
+   * - WorkflowTemplate (defines pipeline topology)
+   * - EventSource (GitHub webhook receiver)
+   * - Sensor (workflow trigger)
+   * - Service Account (IRSA for AWS access)
+   * - S3 Bucket (artifact storage)
+   * 
+   * It does NOT modify cluster infrastructure (EKS, Argo Workflows, Argo Events).
+   * WorkflowTemplate updates take effect on the next workflow run, not the current one.
    */
   private generatePipelineDeploymentStage(): any {
     return {
@@ -136,27 +167,39 @@ export class WorkflowTemplateGenerator {
         ],
       },
       container: {
-        image: 'aphex-pipeline/deployer:latest',
+        image: this.deployerImage,
         command: ['/bin/bash'],
         args: [
           '-c',
           `
         set -e
+        
         echo "Cloning repository..."
         git clone {{inputs.parameters.repo-url}} /workspace
         cd /workspace
         git checkout {{inputs.parameters.commit-sha}}
         
-        echo "Synthesizing Pipeline CDK Stack..."
+        echo "Synthesizing Pipeline CDK Stack (pipeline-specific resources only)..."
         cd pipeline-infra
         npm install
         npx cdk synth AphexPipelineStack
         
-        echo "Deploying Pipeline CDK Stack..."
+        echo "Deploying Pipeline CDK Stack (updates WorkflowTemplate, EventSource, Sensor, etc.)..."
+        echo "Note: This does NOT modify cluster infrastructure (EKS, Argo Workflows, Argo Events)"
         npx cdk deploy AphexPipelineStack --require-approval never
         
-        echo "Pipeline deployment stage complete"
+        echo "Pipeline deployment stage complete - changes will take effect in next workflow run"
         `,
+        ],
+        env: [
+          {
+            name: 'AWS_ROLE_ARN',
+            value: this.workflowExecutionRoleArn,
+          },
+          {
+            name: 'AWS_WEB_IDENTITY_TOKEN_FILE',
+            value: '/var/run/secrets/eks.amazonaws.com/serviceaccount/token',
+          },
         ],
       },
       arguments: {
@@ -231,7 +274,7 @@ export class WorkflowTemplateGenerator {
         ],
       },
       container: {
-        image: 'aphex-pipeline/deployer:latest',
+        image: this.deployerImage,
         command: ['/bin/bash'],
         args: [
           '-c',
@@ -263,6 +306,14 @@ export class WorkflowTemplateGenerator {
         `,
         ],
         env: [
+          {
+            name: 'AWS_ROLE_ARN',
+            value: this.workflowExecutionRoleArn,
+          },
+          {
+            name: 'AWS_WEB_IDENTITY_TOKEN_FILE',
+            value: '/var/run/secrets/eks.amazonaws.com/serviceaccount/token',
+          },
           {
             name: 'AWS_REGION',
             value: env.region,
@@ -303,7 +354,7 @@ export class WorkflowTemplateGenerator {
         ],
       },
       container: {
-        image: 'aphex-pipeline/deployer:latest',
+        image: this.deployerImage,
         command: ['/bin/bash'],
         args: [
           '-c',
@@ -324,6 +375,14 @@ export class WorkflowTemplateGenerator {
         `,
         ],
         env: [
+          {
+            name: 'AWS_ROLE_ARN',
+            value: this.workflowExecutionRoleArn,
+          },
+          {
+            name: 'AWS_WEB_IDENTITY_TOKEN_FILE',
+            value: '/var/run/secrets/eks.amazonaws.com/serviceaccount/token',
+          },
           {
             name: 'AWS_REGION',
             value: env.region,

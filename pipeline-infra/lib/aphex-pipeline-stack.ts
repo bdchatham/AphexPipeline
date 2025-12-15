@@ -1,8 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
-import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as eks from 'aws-cdk-lib/aws-eks';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
@@ -54,43 +52,15 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
    */
   githubWebhookSecretName?: string;
   
-  // ===== EKS Cluster Configuration =====
+  // ===== EKS Cluster Reference =====
   
   /**
-   * EKS cluster name
-   * @default 'aphex-pipeline-cluster'
+   * Name of the existing AphexCluster to reference
+   * Used to discover cluster via CloudFormation exports
+   * The cluster must have been deployed via arbiter-pipeline-infrastructure
+   * @example 'company-pipelines'
    */
-  clusterName?: string;
-  
-  /**
-   * Kubernetes version
-   * @default eks.KubernetesVersion.V1_28
-   */
-  clusterVersion?: eks.KubernetesVersion;
-  
-  /**
-   * Instance types for node group
-   * @default [t3.medium, t3.large]
-   */
-  nodeInstanceTypes?: ec2.InstanceType[];
-  
-  /**
-   * Minimum number of nodes
-   * @default 2
-   */
-  minNodes?: number;
-  
-  /**
-   * Maximum number of nodes
-   * @default 10
-   */
-  maxNodes?: number;
-  
-  /**
-   * Desired number of nodes
-   * @default 3
-   */
-  desiredNodes?: number;
+  clusterName: string;
   
   // ===== Artifact Storage =====
   
@@ -181,11 +151,6 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
   // ===== Advanced =====
   
   /**
-   * Use existing VPC instead of creating new one
-   */
-  vpc?: ec2.IVpc;
-  
-  /**
    * Custom EventSource template path
    */
   eventSourceTemplatePath?: string;
@@ -202,17 +167,21 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
 }
 
 export class AphexPipelineStack extends cdk.Stack {
-  public readonly cluster: eks.Cluster;
+  public readonly cluster: eks.ICluster;
   public readonly clusterName: string;
   public readonly argoWorkflowsUrl: string;
   public readonly argoEventsWebhookUrl: string;
   public readonly artifactBucketName: string;
   public readonly workflowExecutionRoleArn: string;
+  public readonly workflowTemplateName: string;
 
   constructor(scope: Construct, id: string, props: AphexPipelineStackProps) {
     super(scope, id, props);
 
     // Validate required props
+    if (!props.clusterName) {
+      throw new Error('clusterName is required - must reference an existing AphexCluster');
+    }
     if (!props.githubOwner || !props.githubRepo || !props.githubTokenSecretName) {
       throw new Error('githubOwner, githubRepo, and githubTokenSecretName are required');
     }
@@ -220,8 +189,6 @@ export class AphexPipelineStack extends cdk.Stack {
     // Set defaults
     const config = {
       githubBranch: props.githubBranch || 'main',
-      clusterName: props.clusterName || 'aphex-pipeline-cluster',
-      clusterVersion: props.clusterVersion || eks.KubernetesVersion.V1_28,
       argoNamespace: props.argoNamespace || 'argo',
       argoEventsNamespace: props.argoEventsNamespace || 'argo-events',
       serviceAccountName: props.serviceAccountName || 'workflow-executor',
@@ -229,155 +196,50 @@ export class AphexPipelineStack extends cdk.Stack {
       sensorName: props.sensorName || 'aphex-pipeline-sensor',
       workflowTemplateName: props.workflowTemplateName || 'aphex-pipeline-template',
       workflowNamePrefix: props.workflowNamePrefix || 'aphex-pipeline-',
-      argoWorkflowsVersion: props.argoWorkflowsVersion || '0.41.0',
-      argoEventsVersion: props.argoEventsVersion || '2.4.0',
-      minNodes: props.minNodes || 2,
-      maxNodes: props.maxNodes || 10,
-      desiredNodes: props.desiredNodes || 3,
-      nodeInstanceTypes: props.nodeInstanceTypes || [
-        new ec2.InstanceType('t3.medium'),
-        new ec2.InstanceType('t3.large'),
-      ],
       artifactRetentionDays: props.artifactRetentionDays || 90,
       githubTokenSecretK8sName: 'github-access',
       githubWebhookSecretK8sName: 'github-webhook-secret',
+      builderImage: props.builderImage || 'public.ecr.aws/aphex/builder:latest',
+      deployerImage: props.deployerImage || 'public.ecr.aws/aphex/deployer:latest',
     };
 
     // Parse aphex-config.yaml
     const configPath = props.configPath || path.join(__dirname, '../../aphex-config.yaml');
     const aphexConfig = ConfigParser.parse(configPath);
 
-    // Create or use existing VPC
-    const vpc = props.vpc || new ec2.Vpc(this, 'AphexPipelineVpc', {
-      maxAzs: 3,
-      natGateways: 1,
-      subnetConfiguration: [
-        {
-          cidrMask: 24,
-          name: 'Public',
-          subnetType: ec2.SubnetType.PUBLIC,
-        },
-        {
-          cidrMask: 24,
-          name: 'Private',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-        },
-      ],
-    });
-
-    // Create kubectl layer - CDK will use this for kubectl operations
-    // Using a minimal layer that CDK will populate with kubectl binary
-    const kubectlLayer = lambda.LayerVersion.fromLayerVersionArn(
-      this,
-      'KubectlLayer',
-      `arn:aws:lambda:${this.region}:${this.account}:layer:kubectl:1`
-    );
-
-    // Create EKS cluster
-    this.cluster = new eks.Cluster(this, 'AphexPipelineCluster', {
-      version: config.clusterVersion,
-      vpc,
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
-      defaultCapacity: 0, // We'll add managed node groups separately
-      clusterName: config.clusterName,
-      kubectlLayer,
-    });
-
-    // Add managed node group with autoscaling
-    this.cluster.addNodegroupCapacity('AphexPipelineNodeGroup', {
-      instanceTypes: config.nodeInstanceTypes,
-      minSize: config.minNodes,
-      maxSize: config.maxNodes,
-      desiredSize: config.desiredNodes,
-      diskSize: 50,
-      amiType: eks.NodegroupAmiType.AL2_X86_64,
-      capacityType: eks.CapacityType.ON_DEMAND,
+    // Import existing cluster using CloudFormation exports
+    // The arbiter-pipeline-infrastructure package exports cluster attributes with this naming pattern
+    const clusterNameExport = `AphexCluster-${props.clusterName}-ClusterName`;
+    const oidcProviderArnExport = `AphexCluster-${props.clusterName}-OIDCProviderArn`;
+    const kubectlRoleArnExport = `AphexCluster-${props.clusterName}-KubectlRoleArn`;
+    
+    const importedClusterName = cdk.Fn.importValue(clusterNameExport);
+    const openIdConnectProviderArn = cdk.Fn.importValue(oidcProviderArnExport);
+    const kubectlRoleArn = cdk.Fn.importValue(kubectlRoleArnExport);
+    
+    // Import the cluster using the imported attributes
+    this.cluster = eks.Cluster.fromClusterAttributes(this, 'ImportedCluster', {
+      clusterName: importedClusterName,
+      kubectlRoleArn: kubectlRoleArn,
+      openIdConnectProvider: eks.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+        this,
+        'ClusterOIDCProvider',
+        openIdConnectProviderArn
+      ),
     });
 
     // Store cluster name
-    this.clusterName = this.cluster.clusterName;
+    this.clusterName = importedClusterName;
 
-    // Create namespace for Argo Workflows
-    const argoNamespace = this.cluster.addManifest('ArgoNamespace', {
-      apiVersion: 'v1',
-      kind: 'Namespace',
-      metadata: {
-        name: config.argoNamespace,
-      },
-    });
+    // Note: Argo Workflows and Argo Events are assumed to be pre-installed by aphex-cluster package
+    // We verify their presence but do not install them
 
-    // Install Argo Workflows via Helm
-    const argoWorkflows = this.cluster.addHelmChart('ArgoWorkflows', {
-      chart: 'argo-workflows',
-      repository: 'https://argoproj.github.io/argo-helm',
-      namespace: config.argoNamespace,
-      release: 'argo-workflows',
-      version: config.argoWorkflowsVersion,
-      values: {
-        server: {
-          enabled: true,
-          serviceType: 'LoadBalancer',
-          extraArgs: ['--auth-mode=server'],
-        },
-        controller: {
-          enabled: true,
-        },
-        executor: {
-          enabled: true,
-        },
-      },
-    });
-    argoWorkflows.node.addDependency(argoNamespace);
-
-    // Create namespace for Argo Events
-    const argoEventsNamespace = this.cluster.addManifest('ArgoEventsNamespace', {
-      apiVersion: 'v1',
-      kind: 'Namespace',
-      metadata: {
-        name: config.argoEventsNamespace,
-      },
-    });
-
-    // Install Argo Events via Helm
-    const argoEvents = this.cluster.addHelmChart('ArgoEvents', {
-      chart: 'argo-events',
-      repository: 'https://argoproj.github.io/argo-helm',
-      namespace: config.argoEventsNamespace,
-      release: 'argo-events',
-      version: config.argoEventsVersion,
-      values: {
-        controller: {
-          enabled: true,
-        },
-      },
-    });
-    argoEvents.node.addDependency(argoEventsNamespace);
-
-    // Create EventBus for Argo Events
-    const eventBus = this.cluster.addManifest('ArgoEventBus', {
-      apiVersion: 'argoproj.io/v1alpha1',
-      kind: 'EventBus',
-      metadata: {
-        name: 'default',
-        namespace: config.argoEventsNamespace,
-      },
-      spec: {
-        nats: {
-          native: {
-            replicas: 3,
-            auth: 'none',
-          },
-        },
-      },
-    });
-    eventBus.node.addDependency(argoEvents);
-
-    // Create service account for workflow execution with IRSA
+    // Create pipeline-specific service account for workflow execution with IRSA
+    // The namespace (argo) is assumed to exist from the cluster setup
     const workflowServiceAccount = this.cluster.addServiceAccount('WorkflowExecutionServiceAccount', {
       name: config.serviceAccountName,
       namespace: config.argoNamespace,
     });
-    workflowServiceAccount.node.addDependency(argoNamespace);
 
     // Add IAM policies for workflow execution
     // S3 access for artifacts
@@ -474,16 +336,20 @@ export class AphexPipelineStack extends cdk.Stack {
     const workflowGenerator = new WorkflowTemplateGenerator(
       aphexConfig,
       this.artifactBucketName,
-      config.serviceAccountName
+      config.serviceAccountName,
+      config.builderImage,
+      config.deployerImage,
+      this.workflowExecutionRoleArn
     );
     const workflowTemplate = workflowGenerator.generate();
 
     // Apply WorkflowTemplate to the cluster
+    // Note: Argo Workflows is assumed to be pre-installed, so no dependency needed
     const workflowTemplateManifest = this.cluster.addManifest('AphexPipelineWorkflowTemplate', workflowTemplate);
-    workflowTemplateManifest.node.addDependency(argoWorkflows);
     workflowTemplateManifest.node.addDependency(workflowServiceAccount);
 
     // Create GitHub secrets in Kubernetes
+    // Note: argo-events namespace is assumed to exist from cluster setup
     const githubSecrets = this.createGitHubSecrets(
       props.githubTokenSecretName,
       props.githubWebhookSecretName,
@@ -491,15 +357,14 @@ export class AphexPipelineStack extends cdk.Stack {
       config.githubTokenSecretK8sName,
       config.githubWebhookSecretK8sName
     );
-    githubSecrets.node.addDependency(argoEventsNamespace);
 
     // Deploy EventSource from template
+    // Note: EventBus is assumed to exist from cluster setup
     const eventSource = this.deployEventSource(
       props,
       config,
       props.eventSourceTemplatePath
     );
-    eventSource.node.addDependency(eventBus);
     eventSource.node.addDependency(githubSecrets);
 
     // Deploy Sensor from template
@@ -518,38 +383,18 @@ export class AphexPipelineStack extends cdk.Stack {
       this.workflowExecutionRoleArn,
       props.loggingConfigTemplatePath
     );
-    loggingConfig.node.addDependency(argoWorkflows);
     loggingConfig.node.addDependency(workflowServiceAccount);
 
     // Set URLs (LoadBalancer DNS will be available after deployment)
     this.argoWorkflowsUrl = `http://<argo-workflows-server-LoadBalancer>:2746`;
     this.argoEventsWebhookUrl = `http://<${config.eventSourceName}-eventsource-svc-LoadBalancer>:12000/push`;
+    this.workflowTemplateName = config.workflowTemplateName;
 
-    // Stack outputs
-    new cdk.CfnOutput(this, 'ClusterName', {
-      value: this.cluster.clusterName,
-      description: 'EKS Cluster Name',
-      exportName: 'AphexPipelineClusterName',
-    });
-
-    new cdk.CfnOutput(this, 'ClusterArn', {
-      value: this.cluster.clusterArn,
-      description: 'EKS Cluster ARN',
-    });
-
-    new cdk.CfnOutput(this, 'KubectlRoleArn', {
-      value: this.cluster.kubectlRole?.roleArn || 'N/A',
-      description: 'IAM Role ARN for kubectl access',
-    });
-
-    new cdk.CfnOutput(this, 'ArgoWorkflowsUrl', {
-      value: this.argoWorkflowsUrl,
-      description: 'Argo Workflows UI URL (LoadBalancer DNS will be available after deployment)',
-    });
-
+    // Stack outputs - pipeline-specific only
     new cdk.CfnOutput(this, 'ArgoEventsWebhookUrl', {
       value: this.argoEventsWebhookUrl || 'To be configured after EventSource deployment',
       description: 'Argo Events Webhook URL for GitHub integration',
+      exportName: 'AphexPipelineWebhookUrl',
     });
 
     new cdk.CfnOutput(this, 'ArtifactBucketName', {
@@ -564,9 +409,10 @@ export class AphexPipelineStack extends cdk.Stack {
       exportName: 'AphexPipelineWorkflowExecutionRole',
     });
 
-    new cdk.CfnOutput(this, 'VpcId', {
-      value: vpc.vpcId,
-      description: 'VPC ID for the EKS cluster',
+    new cdk.CfnOutput(this, 'WorkflowTemplateName', {
+      value: this.workflowTemplateName,
+      description: 'Argo WorkflowTemplate name',
+      exportName: 'AphexPipelineWorkflowTemplateName',
     });
 
     new cdk.CfnOutput(this, 'GitHubWebhookInstructions', {
@@ -646,7 +492,7 @@ export class AphexPipelineStack extends cdk.Stack {
     // When installed as npm package, templates are in dist/.argo/
     // When running from source, templates are in ../../.argo/
     const templatePath = customTemplatePath || 
-      path.join(__dirname, '../.argo/eventsource-github.yaml');
+      path.join(__dirname, '../../.argo/eventsource-github.yaml');
     const template = fs.readFileSync(templatePath, 'utf8');
 
     // Substitute variables
@@ -675,7 +521,7 @@ export class AphexPipelineStack extends cdk.Stack {
     // When installed as npm package, templates are in dist/.argo/
     // When running from source, templates are in ../../.argo/
     const templatePath = customTemplatePath || 
-      path.join(__dirname, '../.argo/sensor-aphex-pipeline.yaml');
+      path.join(__dirname, '../../.argo/sensor-aphex-pipeline.yaml');
     const template = fs.readFileSync(templatePath, 'utf8');
 
     // Substitute variables
@@ -707,7 +553,7 @@ export class AphexPipelineStack extends cdk.Stack {
     // When installed as npm package, templates are in dist/.argo/
     // When running from source, templates are in ../../.argo/
     const templatePath = customTemplatePath || 
-      path.join(__dirname, '../.argo/logging-config.yaml');
+      path.join(__dirname, '../../.argo/logging-config.yaml');
     const template = fs.readFileSync(templatePath, 'utf8');
 
     // Substitute variables

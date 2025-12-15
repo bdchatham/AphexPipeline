@@ -19,14 +19,26 @@ npm install @bdchatham/AphexPipeline
 
 ## Prerequisites
 
+- **Existing EKS cluster** with Argo Workflows and Argo Events installed
+  - Typically deployed using the `aphex-cluster` package
+  - Cluster must export its name via CloudFormation (default: "AphexCluster-ClusterName")
 - AWS account with appropriate permissions
 - AWS CDK CLI: `npm install -g aws-cdk`
+- kubectl configured for cluster access
 - GitHub repository with admin access
 - GitHub token stored in AWS Secrets Manager
 
 ## Quick Start
 
-### 1. Create GitHub Token Secret
+### 1. Deploy EKS Cluster (if not already done)
+
+```bash
+# Use the aphex-cluster package to deploy the shared cluster infrastructure
+npm install @bdchatham/aphex-cluster
+# Follow aphex-cluster documentation to deploy cluster
+```
+
+### 2. Create GitHub Token Secret
 
 ```bash
 aws secretsmanager create-secret \
@@ -34,7 +46,7 @@ aws secretsmanager create-secret \
   --secret-string '{"token":"ghp_your_token_here"}'
 ```
 
-### 2. Use in Your CDK App
+### 3. Use in Your CDK App
 
 ```typescript
 import { AphexPipelineStack } from '@bdchatham/AphexPipeline';
@@ -48,16 +60,17 @@ new AphexPipelineStack(app, 'MyPipeline', {
     region: 'us-east-1' 
   },
   
-  // Required
+  // Required: GitHub configuration
   githubOwner: 'my-org',
   githubRepo: 'my-repo',
   githubTokenSecretName: 'github-token',
   
-  // Optional
+  // Optional: Cluster reference (defaults to CloudFormation export lookup)
+  // clusterExportName: 'AphexCluster-ClusterName', // default
+  
+  // Optional: Other configuration
   githubBranch: 'main',
-  clusterName: 'my-pipeline',
-  minNodes: 3,
-  maxNodes: 20,
+  workflowTemplateName: 'my-app-pipeline-template',
 });
 
 app.synth();
@@ -83,7 +96,20 @@ environments:
         path: lib/my-app-stack.ts
 ```
 
-### 4. Deploy
+### 4. Verify Cluster Prerequisites
+
+```bash
+# Configure kubectl for your cluster
+aws eks update-kubeconfig --name <cluster-name> --region us-east-1
+
+# Verify Argo Workflows is installed
+kubectl get pods -n argo
+
+# Verify Argo Events is installed
+kubectl get pods -n argo-events
+```
+
+### 5. Deploy Pipeline
 
 ```bash
 cdk deploy MyPipeline
@@ -99,99 +125,114 @@ cdk deploy MyPipeline
 
 ### Optional Parameters
 
+**Cluster Reference**:
+- `clusterExportName` - CloudFormation export name for cluster (default: `'AphexCluster-ClusterName'`)
+
 **GitHub**:
 - `githubBranch` - Branch to trigger on (default: `'main'`)
 - `githubWebhookSecretName` - Webhook validation secret
 
-**EKS Cluster**:
-- `clusterName` - Cluster name (default: `'aphex-pipeline-cluster'`)
-- `clusterVersion` - Kubernetes version (default: `V1_28`)
-- `nodeInstanceTypes` - Instance types (default: `[t3.medium, t3.large]`)
-- `minNodes` - Minimum nodes (default: `2`)
-- `maxNodes` - Maximum nodes (default: `10`)
-- `desiredNodes` - Desired nodes (default: `3`)
-
 **Storage**:
-- `artifactBucketName` - S3 bucket name
+- `artifactBucketName` - S3 bucket name (default: auto-generated)
 - `artifactRetentionDays` - Retention period (default: `90`)
 
 **Argo**:
-- `argoWorkflowsVersion` - Helm chart version (default: `'0.41.0'`)
-- `argoEventsVersion` - Helm chart version (default: `'2.4.0'`)
-- `argoNamespace` - Namespace (default: `'argo'`)
-- `argoEventsNamespace` - Namespace (default: `'argo-events'`)
+- `argoNamespace` - Argo Workflows namespace (default: `'argo'`)
+- `argoEventsNamespace` - Argo Events namespace (default: `'argo-events'`)
 
-**Naming**:
+**Naming** (important for multi-pipeline deployments):
 - `eventSourceName` - EventSource name (default: `'github'`)
 - `sensorName` - Sensor name (default: `'aphex-pipeline-sensor'`)
 - `workflowTemplateName` - Template name (default: `'aphex-pipeline-template'`)
 - `serviceAccountName` - Service account (default: `'workflow-executor'`)
+- `workflowNamePrefix` - Workflow name prefix (default: `'aphex-pipeline-'`)
 
 **Advanced**:
-- `vpc` - Use existing VPC
 - `builderImage` - Custom builder container image
 - `deployerImage` - Custom deployer container image
+- `configPath` - Path to aphex-config.yaml (default: `'../aphex-config.yaml'`)
 
 ## What Gets Created
 
-When you deploy AphexPipelineStack, it automatically creates:
+When you deploy AphexPipelineStack, it creates **pipeline-specific resources** on your existing cluster:
 
-- ✅ VPC with public and private subnets
-- ✅ EKS cluster with managed node groups
-- ✅ Argo Workflows (via Helm)
-- ✅ Argo Events (via Helm)
-- ✅ EventBus for Argo Events
+**Pipeline Resources**:
+- ✅ WorkflowTemplate (pipeline topology)
+- ✅ EventSource (GitHub webhook receiver)
+- ✅ Sensor (workflow trigger)
 - ✅ Service account with IRSA
 - ✅ IAM roles and policies
 - ✅ S3 bucket for artifacts
 - ✅ GitHub secrets in Kubernetes
-- ✅ EventSource for GitHub webhooks
-- ✅ Sensor for workflow triggering
 - ✅ Logging configuration
-- ✅ WorkflowTemplate from config
+
+**Shared Cluster Resources** (managed separately by aphex-cluster):
+- ℹ️ EKS cluster (pre-existing)
+- ℹ️ Argo Workflows (pre-installed)
+- ℹ️ Argo Events (pre-installed)
+- ℹ️ EventBus (pre-existing)
+
+**Key Benefits**:
+- Multiple pipelines can share the same cluster
+- Destroying a pipeline doesn't affect the cluster
+- Cost-efficient multi-tenancy
 
 ## Examples
 
-### Use Existing VPC
+See the [examples/](examples/) directory for complete working examples:
 
-```typescript
-import * as ec2 from 'aws-cdk-lib/aws-ec2';
+### Single Pipeline
 
-const vpc = ec2.Vpc.fromLookup(this, 'ExistingVpc', {
-  vpcId: 'vpc-12345678',
-});
-
-new AphexPipelineStack(app, 'MyPipeline', {
-  // ... other props
-  vpc: vpc,
-});
-```
-
-### Custom Container Images
+Minimal configuration for deploying one pipeline:
 
 ```typescript
 new AphexPipelineStack(app, 'MyPipeline', {
-  // ... other props
-  builderImage: '123456789012.dkr.ecr.us-east-1.amazonaws.com/builder:latest',
-  deployerImage: '123456789012.dkr.ecr.us-east-1.amazonaws.com/deployer:latest',
+  env: { account: '123456789012', region: 'us-east-1' },
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+  // All other parameters use defaults
 });
 ```
 
-### Multiple Pipelines
+See [examples/single-pipeline-example.ts](examples/single-pipeline-example.ts)
+
+### Multiple Pipelines on Same Cluster
+
+Deploy multiple pipelines with proper resource isolation:
 
 ```typescript
+// Frontend pipeline
 new AphexPipelineStack(app, 'FrontendPipeline', {
-  // ... props for frontend
   githubRepo: 'frontend',
-  clusterName: 'frontend-pipeline',
+  workflowTemplateName: 'frontend-pipeline-template',
+  eventSourceName: 'frontend-github',
+  sensorName: 'frontend-pipeline-sensor',
 });
 
+// Backend pipeline
 new AphexPipelineStack(app, 'BackendPipeline', {
-  // ... props for backend
   githubRepo: 'backend',
-  clusterName: 'backend-pipeline',
+  workflowTemplateName: 'backend-pipeline-template',
+  eventSourceName: 'backend-github',
+  sensorName: 'backend-pipeline-sensor',
 });
 ```
+
+See [examples/multi-pipeline-example.ts](examples/multi-pipeline-example.ts)
+
+### Custom Cluster Reference
+
+Reference a cluster with a custom export name:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  clusterExportName: 'MyCompany-EKS-ClusterName',
+});
+```
+
+See [examples/custom-cluster-reference-example.ts](examples/custom-cluster-reference-example.ts)
 
 ## Documentation
 

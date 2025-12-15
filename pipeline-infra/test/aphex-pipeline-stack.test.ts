@@ -9,6 +9,9 @@ describe('AphexPipelineStack', () => {
 
   beforeEach(() => {
     app = new cdk.App();
+    
+    // Mock the CloudFormation exports that the stack expects
+    // In a real deployment, these would come from the aphex-cluster stack
     stack = new AphexPipelineStack(app, 'TestStack', {
       env: {
         account: '123456789012',
@@ -19,6 +22,7 @@ describe('AphexPipelineStack', () => {
       githubRepo: 'test-repo',
       githubTokenSecretName: 'test-github-token',
       // Optional: use defaults for other parameters
+      clusterExportName: 'AphexCluster-ClusterName',
     });
     template = Template.fromStack(stack);
   });
@@ -27,28 +31,26 @@ describe('AphexPipelineStack', () => {
     expect(template).toBeDefined();
   });
 
-  describe('EKS Cluster Configuration', () => {
-    test('Creates EKS cluster with correct version', () => {
-      template.hasResourceProperties('Custom::AWSCDK-EKS-Cluster', {
-        Config: Match.objectLike({
-          version: '1.28',
-        }),
-      });
+  describe('Cluster Import', () => {
+    test('Does not create EKS cluster', () => {
+      // Verify that no EKS cluster is created
+      template.resourceCountIs('Custom::AWSCDK-EKS-Cluster', 0);
     });
 
-    test('Creates VPC with public and private subnets', () => {
-      template.resourceCountIs('AWS::EC2::VPC', 1);
-      template.resourceCountIs('AWS::EC2::Subnet', 6); // 3 AZs * 2 subnet types
+    test('Does not create VPC', () => {
+      // Verify that no VPC is created
+      template.resourceCountIs('AWS::EC2::VPC', 0);
     });
 
-    test('Creates managed node group', () => {
-      template.hasResourceProperties('AWS::EKS::Nodegroup', {
-        ScalingConfig: {
-          MinSize: 2,
-          MaxSize: 10,
-          DesiredSize: 3,
-        },
-      });
+    test('Does not create node groups', () => {
+      // Verify that no node groups are created
+      template.resourceCountIs('AWS::EKS::Nodegroup', 0);
+    });
+
+    test('Stack references cluster via CloudFormation import', () => {
+      // The stack should use Fn::ImportValue to reference the cluster
+      // This is implicit in the cluster import, so we verify the stack doesn't create cluster resources
+      expect(stack.clusterName).toBeDefined();
     });
   });
 
@@ -150,10 +152,25 @@ describe('AphexPipelineStack', () => {
   });
 
   describe('Stack Outputs', () => {
-    test('Outputs cluster name', () => {
-      template.hasOutput('ClusterName', {
-        Description: 'EKS Cluster Name',
-      });
+    test('Does not output cluster name', () => {
+      // Cluster name should not be in outputs since cluster is managed separately
+      expect(() => {
+        template.hasOutput('ClusterName', {});
+      }).toThrow();
+    });
+
+    test('Does not output cluster ARN', () => {
+      // Cluster ARN should not be in outputs since cluster is managed separately
+      expect(() => {
+        template.hasOutput('ClusterArn', {});
+      }).toThrow();
+    });
+
+    test('Does not output VPC ID', () => {
+      // VPC ID should not be in outputs since VPC is managed by cluster
+      expect(() => {
+        template.hasOutput('VpcId', {});
+      }).toThrow();
     });
 
     test('Outputs artifact bucket name', () => {
@@ -166,6 +183,45 @@ describe('AphexPipelineStack', () => {
       template.hasOutput('WorkflowExecutionRoleArn', {
         Description: 'IAM Role ARN for workflow execution (IRSA)',
       });
+    });
+
+    test('Outputs WorkflowTemplate name', () => {
+      template.hasOutput('WorkflowTemplateName', {
+        Description: 'Argo WorkflowTemplate name',
+      });
+    });
+
+    test('Outputs webhook URL', () => {
+      template.hasOutput('ArgoEventsWebhookUrl', {
+        Description: 'Argo Events Webhook URL for GitHub integration',
+      });
+    });
+  });
+
+  describe('Pipeline-Specific Resources', () => {
+    test('Creates pipeline-specific S3 bucket', () => {
+      // Verify S3 bucket is created (pipeline-specific)
+      template.resourceCountIs('AWS::S3::Bucket', 1);
+    });
+
+    test('Creates pipeline-specific service account', () => {
+      // Verify service account IAM role is created (pipeline-specific)
+      template.hasResourceProperties('AWS::IAM::Role', {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Effect: 'Allow',
+            }),
+          ]),
+        },
+      });
+    });
+
+    test('Does not modify cluster resources', () => {
+      // Verify no Helm charts are installed (Argo Workflows, Argo Events)
+      // These would show up as Custom::AWSCDK-EKS-HelmChart resources
+      template.resourceCountIs('Custom::AWSCDK-EKS-HelmChart', 0);
     });
   });
 });

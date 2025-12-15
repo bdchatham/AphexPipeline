@@ -338,6 +338,135 @@ kubectl describe serviceaccount -n argo workflow-executor
 aws iam get-role --role-name <workflow-execution-role>
 ```
 
+### Cluster Access Problems
+
+**Symptoms**: Pipeline deployment fails with cluster access errors
+
+**Diagnosis**:
+1. Verify cluster exists and is accessible
+2. Check kubectl configuration
+3. Verify IAM permissions for cluster access
+
+**Common Causes**:
+- **Cluster not found**: Cluster name or export name is incorrect
+  - Solution: Verify cluster name matches CloudFormation export or provided parameter
+  
+- **kubectl not configured**: Cannot access cluster
+  - Solution: Configure kubectl with cluster credentials
+  
+- **IAM permissions**: Insufficient permissions to access cluster
+  - Solution: Verify IAM role has eks:DescribeCluster permission
+
+**Solutions**:
+```bash
+# Verify cluster exists
+aws eks describe-cluster --name <cluster-name> --region <region>
+
+# Configure kubectl
+aws eks update-kubeconfig --name <cluster-name> --region <region>
+
+# Test cluster access
+kubectl cluster-info
+kubectl get nodes
+
+# Check CloudFormation exports
+aws cloudformation list-exports | grep AphexCluster
+
+# Verify specific export
+aws cloudformation list-exports \
+  --query "Exports[?Name=='AphexCluster-ClusterName'].Value" \
+  --output text
+```
+
+### Cluster Prerequisites Not Met
+
+**Symptoms**: Pipeline deployment fails because Argo components are not installed
+
+**Diagnosis**:
+1. Check if Argo Workflows is installed
+2. Check if Argo Events is installed
+3. Verify EventBus exists
+
+**Common Causes**:
+- **Argo Workflows not installed**: Workflow Controller not running
+  - Solution: Install Argo Workflows using aphex-cluster package or Helm
+  
+- **Argo Events not installed**: Event Controller not running
+  - Solution: Install Argo Events using aphex-cluster package or Helm
+  
+- **EventBus missing**: EventBus not deployed
+  - Solution: Deploy EventBus using Argo Events
+
+**Solutions**:
+```bash
+# Check Argo Workflows installation
+kubectl get pods -n argo
+kubectl get deployment -n argo workflow-controller
+
+# Check Argo Events installation
+kubectl get pods -n argo-events
+kubectl get deployment -n argo-events eventsource-controller
+
+# Check EventBus
+kubectl get eventbus -n argo-events
+
+# Install using aphex-cluster package
+npm install @bdchatham/aphex-cluster
+# Follow aphex-cluster documentation
+
+# Or install manually with Helm
+helm repo add argo https://argoproj.github.io/argo-helm
+helm install argo-workflows argo/argo-workflows -n argo --create-namespace
+helm install argo-events argo/argo-events -n argo-events --create-namespace
+```
+
+### Multi-Pipeline Interference
+
+**Symptoms**: Multiple pipelines on the same cluster interfere with each other
+
+**Diagnosis**:
+1. Check for resource name conflicts
+2. Verify each pipeline has unique names
+3. Check for shared resources being modified
+
+**Common Causes**:
+- **Duplicate resource names**: Multiple pipelines using same WorkflowTemplate name
+  - Solution: Ensure each pipeline has unique workflowTemplateName parameter
+  
+- **Shared service accounts**: Pipelines sharing the same service account
+  - Solution: Each pipeline should have its own service account
+  
+- **S3 bucket conflicts**: Pipelines writing to same S3 bucket
+  - Solution: Each pipeline should have its own S3 bucket
+
+**Solutions**:
+```bash
+# List all WorkflowTemplates
+kubectl get workflowtemplate -n argo
+
+# List all EventSources
+kubectl get eventsource -n argo-events
+
+# List all Sensors
+kubectl get sensor -n argo-events
+
+# Check for duplicate names
+kubectl get workflowtemplate -n argo -o json | \
+  jq '.items[].metadata.name' | sort | uniq -d
+
+# Verify pipeline-specific resources
+kubectl get workflowtemplate -n argo <pipeline-name>-template
+kubectl get eventsource -n argo-events <pipeline-name>-github
+kubectl get sensor -n argo-events <pipeline-name>-sensor
+```
+
+**Best Practices for Multi-Pipeline Deployments**:
+- Use unique pipeline names for each instance
+- Set unique `workflowTemplateName`, `eventSourceName`, and `sensorName` parameters
+- Use separate S3 buckets for each pipeline
+- Consider using separate namespaces for additional isolation
+- Monitor resource usage to ensure cluster has sufficient capacity
+
 ## Maintenance
 
 ### Regular Maintenance Tasks
