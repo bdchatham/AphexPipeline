@@ -489,10 +489,16 @@ export class AphexPipelineStack extends cdk.Stack {
     customTemplatePath?: string
   ): cdk.aws_eks.KubernetesManifest {
     // Read template
-    // When installed as npm package, templates are in dist/.argo/
-    // When running from source, templates are in ../../.argo/
-    const templatePath = customTemplatePath || 
-      path.join(__dirname, '../../.argo/eventsource-github.yaml');
+    // Try multiple paths to support both development and packaged scenarios
+    let templatePath = customTemplatePath;
+    if (!templatePath) {
+      // When installed as npm package: dist/lib/*.js -> dist/.argo/
+      const packagedPath = path.join(__dirname, '../.argo/eventsource-github.yaml');
+      // When running from source: lib/*.ts -> ../.argo/
+      const sourcePath = path.join(__dirname, '../../.argo/eventsource-github.yaml');
+      
+      templatePath = fs.existsSync(packagedPath) ? packagedPath : sourcePath;
+    }
     const template = fs.readFileSync(templatePath, 'utf8');
 
     // Substitute variables
@@ -518,10 +524,16 @@ export class AphexPipelineStack extends cdk.Stack {
     customTemplatePath?: string
   ): cdk.aws_eks.KubernetesManifest {
     // Read template
-    // When installed as npm package, templates are in dist/.argo/
-    // When running from source, templates are in ../../.argo/
-    const templatePath = customTemplatePath || 
-      path.join(__dirname, '../../.argo/sensor-aphex-pipeline.yaml');
+    // Try multiple paths to support both development and packaged scenarios
+    let templatePath = customTemplatePath;
+    if (!templatePath) {
+      // When installed as npm package: dist/lib/*.js -> dist/.argo/
+      const packagedPath = path.join(__dirname, '../.argo/sensor-aphex-pipeline.yaml');
+      // When running from source: lib/*.ts -> ../.argo/
+      const sourcePath = path.join(__dirname, '../../.argo/sensor-aphex-pipeline.yaml');
+      
+      templatePath = fs.existsSync(packagedPath) ? packagedPath : sourcePath;
+    }
     const template = fs.readFileSync(templatePath, 'utf8');
 
     // Substitute variables
@@ -550,10 +562,16 @@ export class AphexPipelineStack extends cdk.Stack {
     customTemplatePath?: string
   ): cdk.aws_eks.KubernetesManifest {
     // Read template
-    // When installed as npm package, templates are in dist/.argo/
-    // When running from source, templates are in ../../.argo/
-    const templatePath = customTemplatePath || 
-      path.join(__dirname, '../../.argo/logging-config.yaml');
+    // Try multiple paths to support both development and packaged scenarios
+    let templatePath = customTemplatePath;
+    if (!templatePath) {
+      // When installed as npm package: dist/lib/*.js -> dist/.argo/
+      const packagedPath = path.join(__dirname, '../.argo/logging-config.yaml');
+      // When running from source: lib/*.ts -> ../.argo/
+      const sourcePath = path.join(__dirname, '../../.argo/logging-config.yaml');
+      
+      templatePath = fs.existsSync(packagedPath) ? packagedPath : sourcePath;
+    }
     const template = fs.readFileSync(templatePath, 'utf8');
 
     // Substitute variables
