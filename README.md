@@ -490,6 +490,14 @@ See [Architecture Documentation](.kiro/docs/architecture.md) for detailed diagra
 
 ## Documentation
 
+### Integration Guides
+- [ArchonAgent Integration Guide](ARCHON_AGENT_INTEGRATION.md) - Complete guide for integrating AphexPipeline into the ArchonAgent package
+
+### Publishing Guides
+- [Quick Start Publishing](QUICK_START_PUBLISHING.md) - Fast track to publishing on npm
+- [NPM Publishing Guide](NPM_PUBLISHING_GUIDE.md) - Comprehensive publishing documentation
+- [Publishing Checklist](PUBLISH_CHECKLIST.md) - Quick reference checklist
+
 ### Library Usage
 - [Library Usage Guide](.kiro/docs/library-usage.md) - How to import and use AphexPipeline in your CDK project
 
