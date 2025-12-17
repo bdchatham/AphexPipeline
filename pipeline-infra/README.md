@@ -332,11 +332,13 @@ When you deploy AphexPipelineStack, it creates **pipeline-specific resources** o
 **Pipeline Resources**:
 - ✅ WorkflowTemplate (pipeline topology)
 - ✅ EventSource (GitHub webhook receiver)
-- ✅ Sensor (workflow trigger)
-- ✅ Service account with IRSA
+- ✅ Sensor (workflow trigger) with RBAC permissions
+- ✅ Sensor ServiceAccount, Role, and RoleBinding
+- ✅ Workflow execution service account with IRSA
 - ✅ IAM roles and policies
 - ✅ S3 bucket for artifacts
 - ✅ GitHub secrets in Kubernetes
+- ✅ Webhook service (LoadBalancer, NodePort, or ClusterIP)
 - ✅ Logging configuration
 
 **Shared Cluster Resources** (managed separately by aphex-cluster):

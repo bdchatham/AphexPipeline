@@ -452,7 +452,9 @@ export class AphexPipelineStack extends cdk.Stack {
       config.serviceAccountName,
       config.builderImage,
       config.deployerImage,
-      this.workflowExecutionRoleArn
+      this.workflowExecutionRoleArn,
+      config.workflowTemplateName,
+      config.argoNamespace
     );
     const workflowTemplate = workflowGenerator.generate();
 
@@ -486,6 +488,9 @@ export class AphexPipelineStack extends cdk.Stack {
       webhookService.node.addDependency(eventSource);
     }
 
+    // Create RBAC resources for Sensor
+    const sensorRBAC = this.createSensorRBAC(props, config);
+    
     // Deploy Sensor from template
     const sensor = this.deploySensor(
       props,
@@ -494,6 +499,7 @@ export class AphexPipelineStack extends cdk.Stack {
     );
     sensor.node.addDependency(eventSource);
     sensor.node.addDependency(workflowTemplateManifest);
+    sensor.node.addDependency(sensorRBAC);
 
     // Deploy logging configuration from template
     const loggingConfig = this.deployLoggingConfig(
@@ -570,6 +576,11 @@ export class AphexPipelineStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'WebhookSecretName', {
       value: config.githubWebhookSecretK8sName,
       description: 'Kubernetes secret name containing the webhook secret',
+    });
+    
+    new cdk.CfnOutput(this, 'SensorServiceAccountName', {
+      value: `${config.sensorName}-sa`,
+      description: 'ServiceAccount used by the Sensor to create workflows',
     });
 
     new cdk.CfnOutput(this, 'GitHubWebhookInstructions', {
@@ -704,6 +715,89 @@ export class AphexPipelineStack extends cdk.Stack {
   }
 
   /**
+   * Create RBAC resources for Sensor (ServiceAccount, Role, RoleBinding)
+   */
+  private createSensorRBAC(
+    props: AphexPipelineStackProps,
+    config: any
+  ): cdk.aws_eks.KubernetesManifest {
+    const sensorServiceAccountName = `${config.sensorName}-sa`;
+    const sensorRoleName = `${config.sensorName}-role`;
+    const sensorRoleBindingName = `${config.sensorName}-rolebinding`;
+    
+    // Create ServiceAccount, Role, and RoleBinding in a single manifest
+    const rbacManifests = [
+      // ServiceAccount
+      {
+        apiVersion: 'v1',
+        kind: 'ServiceAccount',
+        metadata: {
+          name: sensorServiceAccountName,
+          namespace: config.argoNamespace,
+          labels: {
+            'app.kubernetes.io/name': config.sensorName,
+            'app.kubernetes.io/component': 'sensor',
+            'app.kubernetes.io/managed-by': 'aphex-pipeline',
+            'app.kubernetes.io/instance': config.workflowTemplateName,
+          },
+        },
+      },
+      // Role
+      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'Role',
+        metadata: {
+          name: sensorRoleName,
+          namespace: config.argoNamespace,
+          labels: {
+            'app.kubernetes.io/name': config.sensorName,
+            'app.kubernetes.io/component': 'sensor',
+            'app.kubernetes.io/managed-by': 'aphex-pipeline',
+          },
+        },
+        rules: [
+          {
+            apiGroups: ['argoproj.io'],
+            resources: ['workflows', 'workflowtemplates'],
+            verbs: ['create', 'get', 'list', 'watch'],
+          },
+          {
+            apiGroups: [''],
+            resources: ['pods', 'pods/log'],
+            verbs: ['get', 'list', 'watch'],
+          },
+        ],
+      },
+      // RoleBinding
+      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'RoleBinding',
+        metadata: {
+          name: sensorRoleBindingName,
+          namespace: config.argoNamespace,
+          labels: {
+            'app.kubernetes.io/name': config.sensorName,
+            'app.kubernetes.io/component': 'sensor',
+            'app.kubernetes.io/managed-by': 'aphex-pipeline',
+          },
+        },
+        roleRef: {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'Role',
+          name: sensorRoleName,
+        },
+        subjects: [{
+          kind: 'ServiceAccount',
+          name: sensorServiceAccountName,
+          namespace: config.argoNamespace,
+        }],
+      },
+    ];
+    
+    return this.cluster.addManifest('SensorRBAC', ...rbacManifests);
+  }
+
+  /**
    * Deploy Sensor from template
    */
   private deploySensor(
@@ -726,11 +820,13 @@ export class AphexPipelineStack extends cdk.Stack {
 
     // Substitute variables
     const githubBranchRef = `refs/heads/${config.githubBranch}`;
+    const sensorServiceAccountName = `${config.sensorName}-sa`;
     const processedYaml = template
       .replace(/\$\{SENSOR_NAME\}/g, config.sensorName)
       .replace(/\$\{ARGO_EVENTS_NAMESPACE\}/g, config.argoEventsNamespace)
       .replace(/\$\{EVENT_SOURCE_NAME\}/g, config.eventSourceName)
       .replace(/\$\{GITHUB_BRANCH_REF\}/g, githubBranchRef)
+      .replace(/\$\{SENSOR_SERVICE_ACCOUNT_NAME\}/g, sensorServiceAccountName)
       .replace(/\$\{WORKFLOW_TEMPLATE_NAME\}/g, config.workflowTemplateName)
       .replace(/\$\{WORKFLOW_NAME_PREFIX\}/g, config.workflowNamePrefix)
       .replace(/\$\{ARGO_NAMESPACE\}/g, config.argoNamespace);

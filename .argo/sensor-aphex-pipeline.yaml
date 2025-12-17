@@ -4,6 +4,10 @@ metadata:
   name: ${SENSOR_NAME}
   namespace: ${ARGO_EVENTS_NAMESPACE}
 spec:
+  # ServiceAccount for the Sensor to create workflows
+  template:
+    serviceAccountName: ${SENSOR_SERVICE_ACCOUNT_NAME}
+  
   # Define dependencies - events that this sensor listens for
   dependencies:
     - name: github-push

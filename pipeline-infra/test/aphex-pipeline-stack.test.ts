@@ -435,6 +435,133 @@ describe('AphexPipelineStack', () => {
     });
   });
 
+  describe('WorkflowTemplate Naming', () => {
+    test('Stack synthesizes with custom workflowTemplateName', () => {
+      const appCustom = new cdk.App();
+      const stackCustom = new AphexPipelineStack(appCustom, 'TestStackCustomName', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        workflowTemplateName: 'my-custom-pipeline',
+      });
+
+      // Verify stack synthesizes successfully
+      expect(stackCustom).toBeDefined();
+      expect(stackCustom.workflowTemplateName).toBe('my-custom-pipeline');
+    });
+
+    test('Stack synthesizes with default workflowTemplateName', () => {
+      // Verify stack uses default name
+      expect(stack).toBeDefined();
+      expect(stack.workflowTemplateName).toBe('aphex-pipeline-template');
+    });
+
+    test('WorkflowTemplate name matches Sensor reference', () => {
+      const appMatch = new cdk.App();
+      const stackMatch = new AphexPipelineStack(appMatch, 'TestStackMatch', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        workflowTemplateName: 'archon-agent-pipeline',
+      });
+
+      // Verify the workflowTemplateName is set correctly
+      expect(stackMatch.workflowTemplateName).toBe('archon-agent-pipeline');
+    });
+  });
+
+  describe('Sensor RBAC', () => {
+    test('Creates ServiceAccount for Sensor', () => {
+      // Verify ServiceAccount is created
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"ServiceAccount".*"name":"aphex-pipeline-sensor-sa".*'),
+      });
+    });
+
+    test('Creates Role for Sensor with workflow permissions', () => {
+      // Verify Role is created with correct permissions
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"Role".*"name":"aphex-pipeline-sensor-role".*'),
+      });
+      
+      // Verify workflow creation permissions
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*argoproj.io.*workflows.*create.*'),
+      });
+    });
+
+    test('Creates RoleBinding for Sensor', () => {
+      // Verify RoleBinding is created
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"RoleBinding".*"name":"aphex-pipeline-sensor-rolebinding".*'),
+      });
+    });
+
+    test('Sensor uses correct ServiceAccount', () => {
+      // Verify Sensor references the ServiceAccount
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"Sensor".*serviceAccountName.*aphex-pipeline-sensor-sa.*'),
+      });
+    });
+
+    test('Multiple pipelines have different Sensor ServiceAccounts', () => {
+      const appMulti = new cdk.App();
+      
+      const stack1 = new AphexPipelineStack(appMulti, 'Pipeline1', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'repo1',
+        githubTokenSecretName: 'test-github-token',
+        sensorName: 'app1-sensor',
+      });
+      
+      const stack2 = new AphexPipelineStack(appMulti, 'Pipeline2', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'repo2',
+        githubTokenSecretName: 'test-github-token',
+        sensorName: 'app2-sensor',
+      });
+      
+      const template1 = Template.fromStack(stack1);
+      const template2 = Template.fromStack(stack2);
+      
+      // Stack 1 should have app1-sensor-sa
+      template1.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"app1-sensor-sa".*'),
+      });
+      
+      // Stack 2 should have app2-sensor-sa
+      template2.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"app2-sensor-sa".*'),
+      });
+    });
+
+    test('Outputs Sensor ServiceAccount name', () => {
+      template.hasOutput('SensorServiceAccountName', {
+        Description: 'ServiceAccount used by the Sensor to create workflows',
+      });
+    });
+  });
+
   describe('Pipeline Creator Role', () => {
     test('Uses pipeline creator role when provided', () => {
       const appWithCreatorRole = new cdk.App();

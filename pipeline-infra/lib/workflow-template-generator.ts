@@ -10,6 +10,8 @@ export class WorkflowTemplateGenerator {
   private builderImage: string;
   private deployerImage: string;
   private workflowExecutionRoleArn: string;
+  private workflowTemplateName: string;
+  private namespace: string;
 
   constructor(
     config: AphexConfig,
@@ -17,7 +19,9 @@ export class WorkflowTemplateGenerator {
     serviceAccountName: string = 'workflow-executor',
     builderImage: string = 'public.ecr.aws/aphex/builder:latest',
     deployerImage: string = 'public.ecr.aws/aphex/deployer:latest',
-    workflowExecutionRoleArn?: string
+    workflowExecutionRoleArn?: string,
+    workflowTemplateName: string = 'aphex-pipeline-template',
+    namespace: string = 'argo'
   ) {
     this.config = config;
     this.artifactBucketName = artifactBucketName;
@@ -25,6 +29,8 @@ export class WorkflowTemplateGenerator {
     this.builderImage = builderImage;
     this.deployerImage = deployerImage;
     this.workflowExecutionRoleArn = workflowExecutionRoleArn || '';
+    this.workflowTemplateName = workflowTemplateName;
+    this.namespace = namespace;
   }
 
   /**
@@ -41,8 +47,8 @@ export class WorkflowTemplateGenerator {
       apiVersion: 'argoproj.io/v1alpha1',
       kind: 'WorkflowTemplate',
       metadata: {
-        name: 'aphex-pipeline-template',
-        namespace: 'argo',
+        name: this.workflowTemplateName,
+        namespace: this.namespace,
       },
       spec: {
         serviceAccountName: this.serviceAccountName,
