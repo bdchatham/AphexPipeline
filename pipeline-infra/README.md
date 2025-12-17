@@ -115,6 +115,25 @@ kubectl get pods -n argo-events
 cdk deploy MyPipeline
 ```
 
+### 6. Configure GitHub Webhook
+
+After deployment, get the webhook secret from stack outputs:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name MyPipeline \
+  --query 'Stacks[0].Outputs[?OutputKey==`WebhookSecretValue`].OutputValue' \
+  --output text
+```
+
+Then configure the webhook in GitHub:
+1. Go to your repository settings → Webhooks → Add webhook
+2. Set Payload URL to the webhook URL from stack outputs
+3. Set Content type to `application/json`
+4. Set Secret to the value from the command above
+5. Select events: Push events, Pull requests
+6. Click "Add webhook"
+
 ## Configuration Options
 
 ### Required Parameters
@@ -138,7 +157,9 @@ cdk deploy MyPipeline
 
 **GitHub**:
 - `githubBranch` - Branch to trigger on (default: `'main'`)
-- `githubWebhookSecretName` - Webhook validation secret
+- `githubWebhookSecretName` - (Optional) AWS Secrets Manager secret name for webhook validation
+  - If not provided, a unique secret is generated automatically per pipeline (recommended)
+  - If provided, uses the secret from AWS Secrets Manager (legacy mode)
 
 **Storage**:
 - `artifactBucketName` - S3 bucket name (default: auto-generated)
@@ -155,10 +176,154 @@ cdk deploy MyPipeline
 - `serviceAccountName` - Service account (default: `'workflow-executor'`)
 - `workflowNamePrefix` - Workflow name prefix (default: `'aphex-pipeline-'`)
 
+**Webhook Service**:
+- `webhookService` - Configuration for the EventSource webhook Kubernetes service
+  - `enabled` - Whether to create a service (default: `true`)
+  - `type` - Service type: `'LoadBalancer'`, `'NodePort'`, or `'ClusterIP'` (default: `'LoadBalancer'`)
+  - `port` - Service port (default: `12000`)
+  - `nodePort` - NodePort value when type is NodePort (default: auto-assigned)
+  - `annotations` - Service annotations for cloud provider configuration (default: `{ 'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb' }`)
+  - `labels` - Additional service labels (default: `{}`)
+
 **Advanced**:
 - `builderImage` - Custom builder container image
 - `deployerImage` - Custom deployer container image
 - `configPath` - Path to aphex-config.yaml (default: `'../aphex-config.yaml'`)
+
+## Webhook Service Configuration
+
+The construct automatically creates a Kubernetes Service for the EventSource webhook with intelligent defaults for production use.
+
+### Default Configuration (LoadBalancer with NLB)
+
+By default, the construct creates an AWS Network Load Balancer:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  // Uses default: LoadBalancer with NLB
+});
+```
+
+**Result:**
+- Creates AWS NLB (~$16/month)
+- Webhook URL: `http://<nlb-dns>:12000/push`
+- Internet-facing, production-ready
+- Best for: Single pipeline or 1-5 pipelines
+
+### NodePort Configuration (Cost-Effective)
+
+For cost-conscious deployments or custom routing:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  webhookService: {
+    type: 'NodePort',
+    nodePort: 30000, // Optional: specify port
+  },
+});
+```
+
+**Result:**
+- No LoadBalancer cost
+- Access via: `http://<node-ip>:30000/push`
+- Requires external routing (Ingress, API Gateway, etc.)
+- Best for: On-premise, hybrid cloud, or custom setups
+
+### ClusterIP Configuration (Internal Only)
+
+For use with Ingress controllers:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  webhookService: {
+    type: 'ClusterIP',
+  },
+});
+```
+
+**Result:**
+- Internal service only
+- URL: `http://<service-name>.argo-events.svc.cluster.local:12000/push`
+- Use with Ingress for HTTPS and path-based routing
+- Best for: Multiple pipelines sharing one Ingress
+
+### Custom Annotations
+
+Configure AWS-specific features:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  webhookService: {
+    type: 'LoadBalancer',
+    annotations: {
+      'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb',
+      'service.beta.kubernetes.io/aws-load-balancer-scheme': 'internal', // Internal LB
+      'service.beta.kubernetes.io/load-balancer-source-ranges': '192.30.252.0/22', // GitHub IPs
+    },
+  },
+});
+```
+
+### Disable Service Creation
+
+For advanced scenarios where you manage external access manually:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  webhookService: {
+    enabled: false,
+  },
+});
+```
+
+## Security: Per-Pipeline Webhook Secrets
+
+Each pipeline automatically generates a **unique webhook secret** for GitHub webhook validation with **unique Kubernetes secret names** to prevent conflicts.
+
+### Why This Matters
+
+- **Isolation**: Each pipeline has its own secret - compromising one doesn't affect others
+- **Blast Radius**: If a secret is compromised, only that pipeline is affected
+- **Audit Trail**: Know exactly which repository triggered which pipeline
+- **No Conflicts**: Multiple pipelines can coexist in the same namespace
+- **Best Practice**: Follows GitHub's security recommendations for webhook validation
+
+### How It Works
+
+1. **Deployment**: CDK generates a random 64-character hex secret
+2. **Unique Naming**: Secret is named `<eventSourceName>-webhook-secret` (e.g., `app1-github-webhook-secret`)
+3. **Storage**: Secret is stored in Kubernetes and output in CloudFormation
+4. **GitHub Config**: You configure this secret in your GitHub webhook settings
+5. **Validation**: GitHub signs each webhook with the secret; Argo Events validates it
+
+### Multiple Pipelines Example
+
+```typescript
+// Pipeline 1
+new AphexPipelineStack(app, 'Pipeline1', {
+  eventSourceName: 'app1-github',
+  // ... other props
+});
+// Creates secret: app1-github-webhook-secret
+
+// Pipeline 2
+new AphexPipelineStack(app, 'Pipeline2', {
+  eventSourceName: 'app2-github',
+  // ... other props
+});
+// Creates secret: app2-github-webhook-secret
+
+// No conflicts! ✅
+```
+
+### Legacy Mode
+
+If you provide `githubWebhookSecretName` (AWS Secrets Manager secret), the construct will use that instead of generating a new secret. This maintains backward compatibility with existing deployments.
 
 ## What Gets Created
 

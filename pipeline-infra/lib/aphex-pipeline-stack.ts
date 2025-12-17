@@ -6,6 +6,7 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as jsyaml from 'js-yaml';
 import { KubectlV30Layer } from '@aws-cdk/lambda-layer-kubectl-v30';
 import { ConfigParser } from './config-parser';
@@ -48,8 +49,16 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
   githubBranch?: string;
   
   /**
-   * AWS Secrets Manager secret name for GitHub webhook validation
-   * If not provided, webhook validation will be disabled
+   * AWS Secrets Manager secret name for GitHub webhook validation (legacy mode)
+   * 
+   * **Recommended: Leave undefined** to use per-pipeline webhook secrets (default behavior).
+   * Each pipeline will generate a unique secret for better security isolation.
+   * 
+   * If provided, the construct will use the secret from AWS Secrets Manager instead.
+   * This is useful for backward compatibility with existing deployments.
+   * 
+   * @default undefined - generates unique secret per pipeline
+   * @example 'github-webhook-secret' (legacy shared secret)
    */
   githubWebhookSecretName?: string;
   
@@ -181,6 +190,70 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
    * Custom logging config template path
    */
   loggingConfigTemplatePath?: string;
+  
+  /**
+   * Configuration for the EventSource webhook service
+   * 
+   * @default { 
+   *   type: 'LoadBalancer',
+   *   enabled: true,
+   *   port: 12000,
+   *   annotations: { 'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb' }
+   * }
+   */
+  readonly webhookService?: {
+    /**
+     * Whether to create a service for the webhook
+     * Set to false if using Ingress or other external access method
+     * 
+     * @default true
+     */
+    enabled?: boolean;
+    
+    /**
+     * Kubernetes service type
+     * 
+     * - LoadBalancer: Creates external IP (AWS ELB/NLB), best for production
+     * - NodePort: Exposes on node IP:port, good for on-prem or custom ingress
+     * - ClusterIP: Internal only, use with Ingress controller
+     * 
+     * @default 'LoadBalancer'
+     */
+    type?: 'LoadBalancer' | 'NodePort' | 'ClusterIP';
+    
+    /**
+     * Service annotations for cloud provider configuration
+     * 
+     * Common AWS annotations:
+     * - 'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb' | 'external'
+     * - 'service.beta.kubernetes.io/aws-load-balancer-scheme': 'internet-facing' | 'internal'
+     * - 'service.beta.kubernetes.io/aws-load-balancer-ssl-cert': '<cert-arn>'
+     * - 'service.beta.kubernetes.io/load-balancer-source-ranges': '<cidr>' (IP whitelisting)
+     * 
+     * @default { 'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb' }
+     */
+    annotations?: Record<string, string>;
+    
+    /**
+     * Service port (must match webhook port)
+     * @default 12000
+     */
+    port?: number;
+    
+    /**
+     * NodePort value (only used if type is NodePort)
+     * If not specified, Kubernetes assigns automatically
+     * 
+     * @default undefined
+     */
+    nodePort?: number;
+    
+    /**
+     * Additional service labels
+     * @default {}
+     */
+    labels?: Record<string, string>;
+  };
 }
 
 export class AphexPipelineStack extends cdk.Stack {
@@ -191,6 +264,8 @@ export class AphexPipelineStack extends cdk.Stack {
   public readonly artifactBucketName: string;
   public readonly workflowExecutionRoleArn: string;
   public readonly workflowTemplateName: string;
+  public webhookSecretValue: string;
+  public readonly webhookServiceType: string;
 
   constructor(scope: Construct, id: string, props: AphexPipelineStackProps) {
     super(scope, id, props);
@@ -215,7 +290,7 @@ export class AphexPipelineStack extends cdk.Stack {
       workflowNamePrefix: props.workflowNamePrefix || 'aphex-pipeline-',
       artifactRetentionDays: props.artifactRetentionDays || 90,
       githubTokenSecretK8sName: 'github-access',
-      githubWebhookSecretK8sName: 'github-webhook-secret',
+      githubWebhookSecretK8sName: `${props.eventSourceName || 'github'}-webhook-secret`,
       builderImage: props.builderImage || 'public.ecr.aws/aphex/builder:latest',
       deployerImage: props.deployerImage || 'public.ecr.aws/aphex/deployer:latest',
     };
@@ -404,6 +479,12 @@ export class AphexPipelineStack extends cdk.Stack {
       props.eventSourceTemplatePath
     );
     eventSource.node.addDependency(githubSecrets);
+    
+    // Create Kubernetes Service for EventSource webhook
+    const webhookService = this.createEventSourceService(props, config);
+    if (webhookService) {
+      webhookService.node.addDependency(eventSource);
+    }
 
     // Deploy Sensor from template
     const sensor = this.deploySensor(
@@ -425,7 +506,35 @@ export class AphexPipelineStack extends cdk.Stack {
 
     // Set URLs (LoadBalancer DNS will be available after deployment)
     this.argoWorkflowsUrl = `http://<argo-workflows-server-LoadBalancer>:2746`;
-    this.argoEventsWebhookUrl = `http://<${config.eventSourceName}-eventsource-svc-LoadBalancer>:12000/push`;
+    
+    // Determine webhook URL based on service configuration
+    const serviceConfig = {
+      enabled: true,
+      type: 'LoadBalancer' as const,
+      port: 12000,
+      annotations: {
+        'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb',
+      },
+      ...props.webhookService,
+    };
+    
+    this.webhookServiceType = serviceConfig.enabled ? serviceConfig.type : 'disabled';
+    
+    if (serviceConfig.enabled) {
+      const serviceName = `${config.eventSourceName}-eventsource-svc`;
+      if (serviceConfig.type === 'LoadBalancer') {
+        this.argoEventsWebhookUrl = `http://<${serviceName}-LoadBalancer-DNS>:${serviceConfig.port}/push`;
+      } else if (serviceConfig.type === 'NodePort') {
+        const nodePortValue = serviceConfig.nodePort || '<assigned-port>';
+        this.argoEventsWebhookUrl = `http://<node-ip>:${nodePortValue}/push`;
+      } else {
+        // ClusterIP
+        this.argoEventsWebhookUrl = `http://${serviceName}.${config.argoEventsNamespace}.svc.cluster.local:${serviceConfig.port}/push`;
+      }
+    } else {
+      this.argoEventsWebhookUrl = 'Service disabled - configure external access manually';
+    }
+    
     this.workflowTemplateName = config.workflowTemplateName;
 
     // Stack outputs - pipeline-specific only
@@ -453,14 +562,40 @@ export class AphexPipelineStack extends cdk.Stack {
       exportName: 'AphexPipelineWorkflowTemplateName',
     });
 
-    new cdk.CfnOutput(this, 'GitHubWebhookInstructions', {
-      value: `Configure webhook at: https://github.com/${props.githubOwner}/${props.githubRepo}/settings/hooks/new`,
-      description: 'GitHub Webhook Configuration URL',
+    new cdk.CfnOutput(this, 'WebhookSecretValue', {
+      value: this.webhookSecretValue,
+      description: 'GitHub webhook secret - configure this in your repository webhook settings',
     });
+    
+    new cdk.CfnOutput(this, 'WebhookSecretName', {
+      value: config.githubWebhookSecretK8sName,
+      description: 'Kubernetes secret name containing the webhook secret',
+    });
+
+    new cdk.CfnOutput(this, 'GitHubWebhookInstructions', {
+      value: `Configure webhook at: https://github.com/${props.githubOwner}/${props.githubRepo}/settings/hooks/new with secret from WebhookSecretValue output`,
+      description: 'GitHub Webhook Configuration Instructions',
+    });
+    
+    new cdk.CfnOutput(this, 'WebhookServiceType', {
+      value: this.webhookServiceType,
+      description: 'Type of Kubernetes service created for webhook (LoadBalancer, NodePort, ClusterIP, or disabled)',
+    });
+    
+    if (serviceConfig.enabled && serviceConfig.type === 'LoadBalancer') {
+      new cdk.CfnOutput(this, 'WebhookServiceName', {
+        value: `${config.eventSourceName}-eventsource-svc`,
+        description: 'Kubernetes service name - use "kubectl get svc -n argo-events <name>" to get LoadBalancer DNS',
+      });
+    }
   }
 
   /**
-   * Create GitHub secrets in Kubernetes from AWS Secrets Manager
+   * Create GitHub secrets in Kubernetes
+   * 
+   * Creates two secrets:
+   * 1. GitHub token (from AWS Secrets Manager)
+   * 2. Webhook secret (generated per-pipeline for security isolation)
    */
   private createGitHubSecrets(
     awsTokenSecretName: string,
@@ -490,32 +625,47 @@ export class AphexPipelineStack extends cdk.Stack {
       },
     };
 
-    // If webhook secret is provided, create it too
-    let webhookSecret: any = null;
+    // Generate or import webhook secret
+    let webhookSecret: any;
+    let webhookSecretValue: string;
+    
     if (awsWebhookSecretName) {
+      // Legacy mode: Use provided AWS Secrets Manager secret
       const githubWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
         this,
         'GitHubWebhookSecret',
         awsWebhookSecretName
       );
-
-      webhookSecret = {
-        apiVersion: 'v1',
-        kind: 'Secret',
-        metadata: {
-          name: k8sWebhookSecretName,
-          namespace: namespace,
-        },
-        type: 'Opaque',
-        stringData: {
-          secret: githubWebhookSecret.secretValueFromJson('secret').unsafeUnwrap(),
-        },
-      };
+      
+      webhookSecretValue = githubWebhookSecret.secretValueFromJson('secret').unsafeUnwrap();
+    } else {
+      // Per-pipeline mode: Generate unique secret for this pipeline
+      webhookSecretValue = crypto.randomBytes(32).toString('hex');
     }
+    
+    // Store the webhook secret value for stack outputs
+    this.webhookSecretValue = webhookSecretValue;
+    
+    // Create Kubernetes secret for webhook
+    webhookSecret = {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: {
+        name: k8sWebhookSecretName,
+        namespace: namespace,
+        labels: {
+          'app.kubernetes.io/managed-by': 'aphex-pipeline',
+          'app.kubernetes.io/instance': this.stackName,
+        },
+      },
+      type: 'Opaque',
+      stringData: {
+        secret: webhookSecretValue,
+      },
+    };
 
     // Apply secrets to cluster
-    const manifests = webhookSecret ? [tokenSecret, webhookSecret] : [tokenSecret];
-    return this.cluster.addManifest('GitHubSecrets', ...manifests);
+    return this.cluster.addManifest('GitHubSecrets', tokenSecret, webhookSecret);
   }
 
   /**
@@ -588,6 +738,69 @@ export class AphexPipelineStack extends cdk.Stack {
     // Parse and apply
     const manifest = jsyaml.load(processedYaml) as Record<string, any>;
     return this.cluster.addManifest('AphexPipelineSensor', manifest);
+  }
+
+  /**
+   * Create Kubernetes Service for EventSource webhook
+   */
+  private createEventSourceService(
+    props: AphexPipelineStackProps,
+    config: any
+  ): cdk.aws_eks.KubernetesManifest | null {
+    // Default configuration
+    const serviceConfig = {
+      enabled: true,
+      type: 'LoadBalancer' as const,
+      port: 12000,
+      annotations: {
+        'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb',
+      },
+      labels: {},
+      ...props.webhookService,
+    };
+    
+    if (!serviceConfig.enabled) {
+      return null; // User disabled service creation
+    }
+    
+    const serviceName = `${config.eventSourceName}-eventsource-svc`;
+    
+    // Build service manifest
+    const serviceManifest: any = {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: {
+        name: serviceName,
+        namespace: config.argoEventsNamespace,
+        labels: {
+          'app.kubernetes.io/name': config.eventSourceName,
+          'app.kubernetes.io/component': 'eventsource-webhook',
+          'app.kubernetes.io/managed-by': 'aphex-pipeline',
+          'app.kubernetes.io/instance': this.stackName,
+          ...serviceConfig.labels,
+        },
+        annotations: serviceConfig.annotations,
+      },
+      spec: {
+        type: serviceConfig.type,
+        ports: [{
+          name: 'webhook',
+          port: serviceConfig.port,
+          targetPort: 12000, // EventSource always listens on 12000
+          protocol: 'TCP',
+        }],
+        selector: {
+          'eventsource-name': config.eventSourceName,
+        },
+      },
+    };
+    
+    // Add nodePort if specified and type is NodePort
+    if (serviceConfig.type === 'NodePort' && serviceConfig.nodePort) {
+      serviceManifest.spec.ports[0].nodePort = serviceConfig.nodePort;
+    }
+    
+    return this.cluster.addManifest('EventSourceWebhookService', serviceManifest);
   }
 
   /**

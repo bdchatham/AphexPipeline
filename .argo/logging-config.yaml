@@ -66,18 +66,10 @@ data:
                 cpu: "1000m"
 
 ---
-# RBAC for Argo Workflows to access S3 for log archival
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ${SERVICE_ACCOUNT_NAME}
-  namespace: ${ARGO_NAMESPACE}
-  annotations:
-    # This annotation links the service account to the IAM role via IRSA
-    # The IAM role ARN is set during CDK deployment
-    eks.amazonaws.com/role-arn: ${WORKFLOW_EXECUTION_ROLE_ARN}
+# Note: ServiceAccount is created by CDK using cluster.addServiceAccount()
+# which automatically sets up IRSA annotations. We don't create it here
+# to avoid duplicates.
 
----
 # Role for workflow pods to create and manage workflows
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

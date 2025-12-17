@@ -36,6 +36,45 @@ AphexPipeline emits metrics to CloudWatch. Create a dashboard with:
 - S3 artifact storage growth
 ```
 
+### Monitoring Webhook Service
+
+#### Check Service Status
+
+```bash
+# Get service details
+kubectl get svc -n argo-events <eventsource-name>-eventsource-svc
+
+# For LoadBalancer type, get external DNS
+kubectl get svc -n argo-events <eventsource-name>-eventsource-svc \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+# Check service endpoints (should match EventSource pod)
+kubectl get endpoints -n argo-events <eventsource-name>-eventsource-svc
+```
+
+#### Verify EventSource Pod
+
+```bash
+# Check EventSource pod is running
+kubectl get pods -n argo-events -l eventsource-name=<eventsource-name>
+
+# View EventSource logs
+kubectl logs -n argo-events -l eventsource-name=<eventsource-name> -f
+```
+
+#### Test Webhook Endpoint
+
+```bash
+# Get webhook URL from stack outputs
+WEBHOOK_URL=$(aws cloudformation describe-stacks \
+  --stack-name MyPipeline \
+  --query 'Stacks[0].Outputs[?OutputKey==`ArgoEventsWebhookUrl`].OutputValue' \
+  --output text)
+
+# Test endpoint (should return 405 Method Not Allowed for GET)
+curl -v $WEBHOOK_URL
+```
+
 ### Monitoring Workflow Execution
 
 #### Via Argo Workflows UI

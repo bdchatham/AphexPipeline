@@ -224,6 +224,217 @@ describe('AphexPipelineStack', () => {
     });
   });
 
+  describe('Webhook Secret', () => {
+    test('Generates unique webhook secret per pipeline', () => {
+      // Verify webhook secret value is set
+      expect(stack.webhookSecretValue).toBeDefined();
+      expect(stack.webhookSecretValue).toHaveLength(64); // 32 bytes = 64 hex chars
+      expect(stack.webhookSecretValue).toMatch(/^[0-9a-f]{64}$/); // Valid hex string
+    });
+
+    test('Outputs webhook secret value', () => {
+      template.hasOutput('WebhookSecretValue', {
+        Description: 'GitHub webhook secret - configure this in your repository webhook settings',
+      });
+    });
+    
+    test('Outputs webhook secret name', () => {
+      template.hasOutput('WebhookSecretName', {
+        Description: 'Kubernetes secret name containing the webhook secret',
+      });
+    });
+
+    test('Different stacks generate different secrets', () => {
+      const app2 = new cdk.App();
+      const stack2 = new AphexPipelineStack(app2, 'TestStack2', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+      });
+
+      // Each stack should have a unique secret
+      expect(stack.webhookSecretValue).not.toBe(stack2.webhookSecretValue);
+    });
+    
+    test('Uses unique secret name based on EventSource name', () => {
+      // Default EventSource name is 'github', so secret should be 'github-webhook-secret'
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"github-webhook-secret".*'),
+      });
+    });
+    
+    test('Multiple pipelines have different secret names', () => {
+      const appMulti = new cdk.App();
+      
+      const stack1 = new AphexPipelineStack(appMulti, 'Pipeline1', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'repo1',
+        githubTokenSecretName: 'test-github-token',
+        eventSourceName: 'app1-github',
+      });
+      
+      const stack2 = new AphexPipelineStack(appMulti, 'Pipeline2', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'repo2',
+        githubTokenSecretName: 'test-github-token',
+        eventSourceName: 'app2-github',
+      });
+      
+      const template1 = Template.fromStack(stack1);
+      const template2 = Template.fromStack(stack2);
+      
+      // Stack 1 should have app1-github-webhook-secret
+      template1.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"app1-github-webhook-secret".*'),
+      });
+      
+      // Stack 2 should have app2-github-webhook-secret
+      template2.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"app2-github-webhook-secret".*'),
+      });
+    });
+  });
+
+  describe('Webhook Service', () => {
+    test('Creates LoadBalancer service by default', () => {
+      // Verify service manifest is created
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"Service".*"type":"LoadBalancer".*'),
+      });
+    });
+
+    test('Service has NLB annotation by default', () => {
+      // Verify NLB annotation is present
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*service.beta.kubernetes.io/aws-load-balancer-type.*nlb.*'),
+      });
+    });
+
+    test('Service selector matches EventSource', () => {
+      // Verify service selector targets the EventSource pods
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"selector":.*"eventsource-name":"github".*'),
+      });
+    });
+
+    test('Supports NodePort service type', () => {
+      const appNodePort = new cdk.App();
+      const stackNodePort = new AphexPipelineStack(appNodePort, 'TestStackNodePort', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        webhookService: {
+          type: 'NodePort',
+          nodePort: 30000,
+        },
+      });
+
+      const templateNodePort = Template.fromStack(stackNodePort);
+      templateNodePort.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"type":"NodePort".*"nodePort":30000.*'),
+      });
+    });
+
+    test('Supports ClusterIP service type', () => {
+      const appClusterIP = new cdk.App();
+      const stackClusterIP = new AphexPipelineStack(appClusterIP, 'TestStackClusterIP', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        webhookService: {
+          type: 'ClusterIP',
+        },
+      });
+
+      const templateClusterIP = Template.fromStack(stackClusterIP);
+      templateClusterIP.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"type":"ClusterIP".*'),
+      });
+    });
+
+    test('Supports custom annotations', () => {
+      const appCustom = new cdk.App();
+      const stackCustom = new AphexPipelineStack(appCustom, 'TestStackCustom', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        webhookService: {
+          type: 'LoadBalancer',
+          annotations: {
+            'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb',
+            'service.beta.kubernetes.io/aws-load-balancer-scheme': 'internal',
+          },
+        },
+      });
+
+      const templateCustom = Template.fromStack(stackCustom);
+      templateCustom.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*aws-load-balancer-scheme.*internal.*'),
+      });
+    });
+
+    test('Can disable service creation', () => {
+      const appDisabled = new cdk.App();
+      const stackDisabled = new AphexPipelineStack(appDisabled, 'TestStackDisabled', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        webhookService: {
+          enabled: false,
+        },
+      });
+
+      expect(stackDisabled.webhookServiceType).toBe('disabled');
+    });
+
+    test('Outputs webhook service type', () => {
+      template.hasOutput('WebhookServiceType', {
+        Description: 'Type of Kubernetes service created for webhook (LoadBalancer, NodePort, ClusterIP, or disabled)',
+      });
+    });
+
+    test('Outputs service name for LoadBalancer', () => {
+      template.hasOutput('WebhookServiceName', {
+        Description: Match.stringLikeRegexp('.*kubectl get svc.*'),
+      });
+    });
+  });
+
   describe('Pipeline Creator Role', () => {
     test('Uses pipeline creator role when provided', () => {
       const appWithCreatorRole = new cdk.App();
