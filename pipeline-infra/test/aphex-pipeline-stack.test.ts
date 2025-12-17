@@ -223,4 +223,71 @@ describe('AphexPipelineStack', () => {
       template.resourceCountIs('Custom::AWSCDK-EKS-HelmChart', 0);
     });
   });
+
+  describe('Pipeline Creator Role', () => {
+    test('Uses pipeline creator role when provided', () => {
+      const appWithCreatorRole = new cdk.App();
+      const stackWithCreatorRole = new AphexPipelineStack(appWithCreatorRole, 'TestStackWithCreatorRole', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'test-repo',
+        githubTokenSecretName: 'test-github-token',
+        pipelineCreatorRoleArn: 'arn:aws:iam::123456789012:role/pipeline-creator',
+      });
+
+      // The cluster should be configured with the pipeline creator role
+      // We can't directly inspect the cluster attributes, but we can verify the stack synthesizes successfully
+      expect(stackWithCreatorRole).toBeDefined();
+      expect(stackWithCreatorRole.cluster).toBeDefined();
+    });
+
+    test('Falls back to CloudFormation import without pipeline creator role', () => {
+      // This is the default behavior tested in beforeEach
+      // Verify stack works without pipelineCreatorRoleArn
+      expect(stack).toBeDefined();
+      expect(stack.cluster).toBeDefined();
+    });
+
+    test('Validates pipeline creator role ARN format', () => {
+      const appWithInvalidArn = new cdk.App();
+      
+      // Test with invalid ARN format
+      expect(() => {
+        new AphexPipelineStack(appWithInvalidArn, 'TestStackInvalidArn', {
+          env: {
+            account: '123456789012',
+            region: 'us-east-1',
+          },
+          clusterName: 'test-cluster',
+          githubOwner: 'test-org',
+          githubRepo: 'test-repo',
+          githubTokenSecretName: 'test-github-token',
+          pipelineCreatorRoleArn: 'invalid-arn',
+        });
+      }).toThrow(/pipelineCreatorRoleArn must be a valid IAM role ARN/);
+    });
+
+    test('Rejects ARN with wrong resource type', () => {
+      const appWithWrongType = new cdk.App();
+      
+      // Test with user ARN instead of role ARN
+      expect(() => {
+        new AphexPipelineStack(appWithWrongType, 'TestStackWrongType', {
+          env: {
+            account: '123456789012',
+            region: 'us-east-1',
+          },
+          clusterName: 'test-cluster',
+          githubOwner: 'test-org',
+          githubRepo: 'test-repo',
+          githubTokenSecretName: 'test-github-token',
+          pipelineCreatorRoleArn: 'arn:aws:iam::123456789012:user/some-user',
+        });
+      }).toThrow(/pipelineCreatorRoleArn must be a valid IAM role ARN/);
+    });
+  });
 });

@@ -234,9 +234,26 @@ export class AphexPipelineStack extends cdk.Stack {
     
     const importedClusterName = cdk.Fn.importValue(clusterNameExport);
     const openIdConnectProviderArn = cdk.Fn.importValue(oidcProviderArnExport);
-    const kubectlRoleArn = cdk.Fn.importValue(kubectlRoleArnExport);
     
-    // Import the cluster using the imported attributes
+    // Determine which role to use for kubectl operations
+    // If pipelineCreatorRoleArn is provided, use it directly as the kubectl role
+    // Otherwise, import the kubectl role from CloudFormation exports (backward compatible)
+    let kubectlRoleArn: string;
+    if (props.pipelineCreatorRoleArn) {
+      // Validate ARN format
+      const arnPattern = /^arn:aws:iam::\d{12}:role\/.+$/;
+      if (!arnPattern.test(props.pipelineCreatorRoleArn)) {
+        throw new Error(
+          `pipelineCreatorRoleArn must be a valid IAM role ARN in the format ` +
+          `arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME, got: ${props.pipelineCreatorRoleArn}`
+        );
+      }
+      kubectlRoleArn = props.pipelineCreatorRoleArn;
+    } else {
+      kubectlRoleArn = cdk.Fn.importValue(kubectlRoleArnExport);
+    }
+    
+    // Import the cluster using the determined kubectl role
     this.cluster = eks.Cluster.fromClusterAttributes(this, 'ImportedCluster', {
       clusterName: importedClusterName,
       kubectlRoleArn: kubectlRoleArn,
@@ -248,39 +265,6 @@ export class AphexPipelineStack extends cdk.Stack {
       // Add kubectl layer to enable Kubernetes manifest operations
       kubectlLayer: new KubectlV30Layer(this, 'KubectlLayer'),
     });
-
-    // Configure kubectl Lambda permissions
-    const kubectlProvider = this.cluster.kubectlProvider;
-    if (kubectlProvider && kubectlProvider.handlerRole) {
-      if (props.pipelineCreatorRoleArn) {
-        // Use pipeline creator role as intermediary
-        // This role has permission to assume kubectl role and is trusted by Lambda
-        const pipelineCreatorRole = iam.Role.fromRoleArn(
-          this,
-          'PipelineCreatorRole',
-          props.pipelineCreatorRoleArn
-        );
-        
-        // Grant kubectl Lambda permission to assume pipeline creator role
-        pipelineCreatorRole.grantAssumeRole(kubectlProvider.handlerRole);
-        
-        // Add explicit permission policy to assume the role
-        new iam.Policy(this, 'KubectlAssumeCreatorRolePolicy', {
-          statements: [
-            new iam.PolicyStatement({
-              effect: iam.Effect.ALLOW,
-              actions: ['sts:AssumeRole'],
-              resources: [props.pipelineCreatorRoleArn],
-            }),
-          ],
-          roles: [kubectlProvider.handlerRole],
-        });
-      } else {
-        // Direct approach: grant kubectl Lambda permission to assume kubectl role
-        const kubectlRole = iam.Role.fromRoleArn(this, 'KubectlRole', kubectlRoleArn);
-        kubectlRole.grantAssumeRole(kubectlProvider.handlerRole);
-      }
-    }
 
     // Store cluster name
     this.clusterName = importedClusterName;

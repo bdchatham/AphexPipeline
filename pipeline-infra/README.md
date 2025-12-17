@@ -283,6 +283,93 @@ new AphexPipelineStack(app, 'MyPipeline', {
 
 See [examples/custom-cluster-reference-example.ts](examples/custom-cluster-reference-example.ts)
 
+## Troubleshooting
+
+### Permission Error: "is not authorized to perform: sts:AssumeRole"
+
+**Error Message:**
+```
+User: arn:aws:sts::ACCOUNT:assumed-role/HandlerServiceRole/... 
+is not authorized to perform: sts:AssumeRole 
+on resource: arn:aws:iam::ACCOUNT:role/kubectl-role
+```
+
+**Cause:** The kubectl Lambda cannot assume the kubectl role because the kubectl role's trust policy doesn't allow it.
+
+**Solution 1: Use Pipeline Creator Role (Recommended)**
+
+Add the `pipelineCreatorRoleArn` parameter to your stack:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  pipelineCreatorRoleArn: 'arn:aws:iam::123456789012:role/pipeline-creator',
+});
+```
+
+The pipeline creator role should:
+1. Trust the Lambda service principal
+2. Have permission to assume the kubectl role
+3. Be configured in your cluster stack
+
+**Solution 2: Update Kubectl Role Trust Policy**
+
+If you control the cluster stack, update the kubectl role to trust Lambda:
+
+```typescript
+// In your cluster stack
+kubectlRole.assumeRolePolicy?.addStatements(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    principals: [new iam.ServicePrincipal('lambda.amazonaws.com')],
+    actions: ['sts:AssumeRole'],
+  })
+);
+```
+
+**Note:** Solution 1 is more secure as it limits which Lambdas can assume the kubectl role.
+
+### Invalid ARN Format Error
+
+**Error Message:**
+```
+pipelineCreatorRoleArn must be a valid IAM role ARN in the format 
+arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME
+```
+
+**Cause:** The provided ARN is not in the correct format.
+
+**Solution:** Ensure the ARN follows the pattern `arn:aws:iam::123456789012:role/role-name`
+
+Common mistakes:
+- Using a user ARN instead of role ARN: `arn:aws:iam::123456789012:user/...` ❌
+- Missing account ID: `arn:aws:iam:::role/...` ❌
+- Wrong service: `arn:aws:eks::123456789012:role/...` ❌
+
+### CloudFormation Export Not Found
+
+**Error Message:**
+```
+Export AphexCluster-CLUSTER_NAME-KubectlRoleArn cannot be found
+```
+
+**Cause:** The cluster stack doesn't export the kubectl role ARN, or the export name doesn't match.
+
+**Solution 1:** Use the pipeline creator role instead:
+```typescript
+pipelineCreatorRoleArn: 'arn:aws:iam::123456789012:role/pipeline-creator',
+```
+
+**Solution 2:** Verify the cluster export name:
+```bash
+aws cloudformation list-exports --query "Exports[?Name=='AphexCluster-CLUSTER_NAME-KubectlRoleArn']"
+```
+
+**Solution 3:** Use a custom export prefix:
+```typescript
+clusterExportPrefix: 'ArbiterCluster-',  // Match your cluster's exports
+```
+
 ## Documentation
 
 - [Complete Documentation](https://github.com/bdchatham/aphex-pipeline)

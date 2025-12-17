@@ -1,6 +1,6 @@
 {
   "name": "@bdchatham/aphex-pipeline",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "CDK construct for generating Argo WorkflowTemplates that deploy CDK applications",
   "main": "dist/lib/index.js",
   "types": "dist/lib/index.d.ts",
