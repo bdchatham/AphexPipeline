@@ -126,7 +126,15 @@ cdk deploy MyPipeline
 ### Optional Parameters
 
 **Cluster Reference**:
-- `clusterExportName` - CloudFormation export name for cluster (default: `'AphexCluster-ClusterName'`)
+- `clusterName` - Name of the existing cluster (required)
+- `clusterExportPrefix` - CloudFormation export prefix for cluster resources (default: `'AphexCluster-{clusterName}-'`)
+  - Use this to work with different cluster export naming conventions
+  - Example: `'ArbiterCluster-'` for Arbiter clusters
+  - Example: `'MyCluster-prod-'` for custom naming
+- `pipelineCreatorRoleArn` - ARN of a role that can assume the kubectl role (optional)
+  - Use this when the kubectl role has restricted trust policies
+  - The role should have permission to assume the cluster's kubectl role
+  - Example: `'arn:aws:iam::123456789012:role/pipeline-creator'`
 
 **GitHub**:
 - `githubBranch` - Branch to trigger on (default: `'main'`)
@@ -220,6 +228,47 @@ new AphexPipelineStack(app, 'BackendPipeline', {
 ```
 
 See [examples/multi-pipeline-example.ts](examples/multi-pipeline-example.ts)
+
+### Using with Arbiter Cluster
+
+Reference an Arbiter cluster with custom export prefix:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  env: { account: '123456789012', region: 'us-east-1' },
+  clusterName: 'arbiter-pipeline-cluster',
+  clusterExportPrefix: 'ArbiterCluster-',  // Override default naming
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+});
+```
+
+This allows the construct to work with clusters that use different CloudFormation export naming conventions.
+
+### Using with Pipeline Creator Role
+
+For clusters with restricted kubectl role trust policies, use a pipeline creator role:
+
+```typescript
+// Import the pipeline creator role ARN from cluster exports
+const pipelineCreatorRoleArn = cdk.Fn.importValue('ArbiterCluster-PipelineCreatorRoleArn');
+
+new AphexPipelineStack(app, 'MyPipeline', {
+  env: { account: '123456789012', region: 'us-east-1' },
+  clusterName: 'arbiter-pipeline-cluster',
+  clusterExportPrefix: 'ArbiterCluster-',
+  pipelineCreatorRoleArn: pipelineCreatorRoleArn,  // Use intermediary role
+  githubOwner: 'my-org',
+  githubRepo: 'my-app',
+  githubTokenSecretName: 'github-token',
+});
+```
+
+The pipeline creator role should:
+- Have permission to assume the cluster's kubectl role
+- Trust the Lambda service principal (for CDK custom resources)
+- Be exported by the cluster stack for discovery
 
 ### Custom Cluster Reference
 

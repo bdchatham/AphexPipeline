@@ -7,6 +7,7 @@ import { Construct } from 'constructs';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as jsyaml from 'js-yaml';
+import { KubectlV30Layer } from '@aws-cdk/lambda-layer-kubectl-v30';
 import { ConfigParser } from './config-parser';
 import { WorkflowTemplateGenerator } from './workflow-template-generator';
 
@@ -61,6 +62,22 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
    * @example 'company-pipelines'
    */
   clusterName: string;
+  
+  /**
+   * CloudFormation export prefix for cluster resources
+   * Allows the construct to work with different cluster export naming conventions
+   * @default 'AphexCluster-{clusterName}-'
+   * @example 'ArbiterCluster-' or 'MyCluster-prod-'
+   */
+  clusterExportPrefix?: string;
+  
+  /**
+   * ARN of a role that has permission to assume the kubectl role
+   * If provided, the kubectl provider will use this role for Kubernetes operations
+   * This is useful when the kubectl role has restricted trust policies
+   * @example 'arn:aws:iam::123456789012:role/pipeline-creator'
+   */
+  pipelineCreatorRoleArn?: string;
   
   // ===== Artifact Storage =====
   
@@ -208,10 +225,12 @@ export class AphexPipelineStack extends cdk.Stack {
     const aphexConfig = ConfigParser.parse(configPath);
 
     // Import existing cluster using CloudFormation exports
-    // The arbiter-pipeline-infrastructure package exports cluster attributes with this naming pattern
-    const clusterNameExport = `AphexCluster-${props.clusterName}-ClusterName`;
-    const oidcProviderArnExport = `AphexCluster-${props.clusterName}-OIDCProviderArn`;
-    const kubectlRoleArnExport = `AphexCluster-${props.clusterName}-KubectlRoleArn`;
+    // Use custom export prefix if provided, otherwise default to AphexCluster-{clusterName}-
+    const exportPrefix = props.clusterExportPrefix ?? `AphexCluster-${props.clusterName}-`;
+    
+    const clusterNameExport = `${exportPrefix}ClusterName`;
+    const oidcProviderArnExport = `${exportPrefix}OIDCProviderArn`;
+    const kubectlRoleArnExport = `${exportPrefix}KubectlRoleArn`;
     
     const importedClusterName = cdk.Fn.importValue(clusterNameExport);
     const openIdConnectProviderArn = cdk.Fn.importValue(oidcProviderArnExport);
@@ -226,7 +245,42 @@ export class AphexPipelineStack extends cdk.Stack {
         'ClusterOIDCProvider',
         openIdConnectProviderArn
       ),
+      // Add kubectl layer to enable Kubernetes manifest operations
+      kubectlLayer: new KubectlV30Layer(this, 'KubectlLayer'),
     });
+
+    // Configure kubectl Lambda permissions
+    const kubectlProvider = this.cluster.kubectlProvider;
+    if (kubectlProvider && kubectlProvider.handlerRole) {
+      if (props.pipelineCreatorRoleArn) {
+        // Use pipeline creator role as intermediary
+        // This role has permission to assume kubectl role and is trusted by Lambda
+        const pipelineCreatorRole = iam.Role.fromRoleArn(
+          this,
+          'PipelineCreatorRole',
+          props.pipelineCreatorRoleArn
+        );
+        
+        // Grant kubectl Lambda permission to assume pipeline creator role
+        pipelineCreatorRole.grantAssumeRole(kubectlProvider.handlerRole);
+        
+        // Add explicit permission policy to assume the role
+        new iam.Policy(this, 'KubectlAssumeCreatorRolePolicy', {
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ['sts:AssumeRole'],
+              resources: [props.pipelineCreatorRoleArn],
+            }),
+          ],
+          roles: [kubectlProvider.handlerRole],
+        });
+      } else {
+        // Direct approach: grant kubectl Lambda permission to assume kubectl role
+        const kubectlRole = iam.Role.fromRoleArn(this, 'KubectlRole', kubectlRoleArn);
+        kubectlRole.grantAssumeRole(kubectlProvider.handlerRole);
+      }
+    }
 
     // Store cluster name
     this.clusterName = importedClusterName;
