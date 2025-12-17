@@ -44,16 +44,24 @@ Automatically discovers existing EKS clusters via CloudFormation exports:
 
 ### Container Image Management
 
-Uses published container images with `:latest` tags by default:
-- `public.ecr.aws/aphex/builder:latest` - Build environment
-- `public.ecr.aws/aphex/deployer:latest` - Deployment environment
-- `public.ecr.aws/aphex/tester:latest` - Test environment
-- `public.ecr.aws/aphex/validator:latest` - Validation environment
+Uses convention-based ECR image URIs by default:
+- Builder: `{account}.dkr.ecr.{region}.amazonaws.com/arbiter-pipeline-builder:{version}`
+- Deployer: `{account}.dkr.ecr.{region}.amazonaws.com/arbiter-pipeline-deployer:{version}`
 
-Users can override with custom images for specific needs.
+Default configuration:
+- Account: Stack account (from `env.account`)
+- Region: `us-east-1`
+- Version: `v1.0.1`
+
+Users can customize via properties:
+- `containerImageAccount` - Different ECR account
+- `containerImageRegion` - Different ECR region
+- `containerImageVersion` - Different image version
+- `builderImage` / `deployerImage` - Fully custom image URIs
 
 **Source**
-- `.kiro/specs/aphex-pipeline/requirements.md` (Requirement 15)
+- `pipeline-infra/lib/aphex-pipeline-stack.ts` (lines 168-295)
+- `pipeline-infra/lib/workflow-template-generator.ts`
 
 ### Multi-Environment Support
 

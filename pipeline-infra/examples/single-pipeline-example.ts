@@ -38,7 +38,7 @@ new AphexPipelineStack(app, 'MyAppPipeline', {
   // - Argo namespaces: 'argo' and 'argo-events'
   // - Resource names: Default naming conventions
   // - Artifact bucket: Auto-generated name
-  // - Container images: public.ecr.aws/aphex/*:latest
+  // - Container images: Convention-based ECR URIs (account.dkr.ecr.region.amazonaws.com/arbiter-pipeline-*:version)
 });
 
 app.synth();

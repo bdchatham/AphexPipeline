@@ -16,19 +16,19 @@ export class WorkflowTemplateGenerator {
   constructor(
     config: AphexConfig,
     artifactBucketName: string,
-    serviceAccountName: string = 'workflow-executor',
-    builderImage: string = 'public.ecr.aws/aphex/builder:latest',
-    deployerImage: string = 'public.ecr.aws/aphex/deployer:latest',
-    workflowExecutionRoleArn?: string,
-    workflowTemplateName: string = 'aphex-pipeline-template',
-    namespace: string = 'argo'
+    serviceAccountName: string,
+    builderImage: string,
+    deployerImage: string,
+    workflowExecutionRoleArn: string,
+    workflowTemplateName: string,
+    namespace: string
   ) {
     this.config = config;
     this.artifactBucketName = artifactBucketName;
     this.serviceAccountName = serviceAccountName;
     this.builderImage = builderImage;
     this.deployerImage = deployerImage;
-    this.workflowExecutionRoleArn = workflowExecutionRoleArn || '';
+    this.workflowExecutionRoleArn = workflowExecutionRoleArn;
     this.workflowTemplateName = workflowTemplateName;
     this.namespace = namespace;
   }

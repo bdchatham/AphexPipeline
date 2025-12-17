@@ -46,7 +46,12 @@ describe('Property 6: WorkflowTemplate generation from configuration', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
@@ -77,7 +82,12 @@ describe('Property 6: WorkflowTemplate generation from configuration', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
@@ -111,7 +121,12 @@ describe('Property 6: WorkflowTemplate generation from configuration', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
@@ -137,14 +152,19 @@ describe('Property 6: WorkflowTemplate generation from configuration', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
         // Verify basic structure
         expect(workflowTemplate.apiVersion).toBe('argoproj.io/v1alpha1');
         expect(workflowTemplate.kind).toBe('WorkflowTemplate');
-        expect(workflowTemplate.metadata.name).toBe('aphex-pipeline-template');
+        expect(workflowTemplate.metadata.name).toBe('test-workflow-template');
         expect(workflowTemplate.metadata.namespace).toBe('argo');
         expect(workflowTemplate.spec.serviceAccountName).toBe('test-service-account');
         expect(workflowTemplate.spec.entrypoint).toBe('main');

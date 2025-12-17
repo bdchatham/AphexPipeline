@@ -628,4 +628,73 @@ describe('AphexPipelineStack', () => {
       }).toThrow(/pipelineCreatorRoleArn must be a valid IAM role ARN/);
     });
   });
+
+  describe('Workflow Executor RBAC', () => {
+    test('Creates Role for workflow-executor with WorkflowTaskResults permissions', () => {
+      // Verify Role is created with correct permissions
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"Role".*"name":"workflow-executor-role".*'),
+      });
+      
+      // Verify workflowtaskresults permissions
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*argoproj.io.*workflowtaskresults.*create.*'),
+      });
+    });
+
+    test('Creates RoleBinding for workflow-executor', () => {
+      // Verify RoleBinding is created
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"RoleBinding".*"name":"workflow-executor-rolebinding".*'),
+      });
+    });
+
+    test('RoleBinding references correct Role and ServiceAccount', () => {
+      // Verify RoleBinding binds workflow-executor-role to workflow-executor ServiceAccount
+      template.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"kind":"RoleBinding".*workflow-executor-role.*workflow-executor.*'),
+      });
+    });
+
+    test('Multiple pipelines have different workflow-executor Roles', () => {
+      const appMulti = new cdk.App();
+      
+      const stack1 = new AphexPipelineStack(appMulti, 'Pipeline1', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'repo1',
+        githubTokenSecretName: 'test-github-token',
+        serviceAccountName: 'app1-executor',
+      });
+      
+      const stack2 = new AphexPipelineStack(appMulti, 'Pipeline2', {
+        env: {
+          account: '123456789012',
+          region: 'us-east-1',
+        },
+        clusterName: 'test-cluster',
+        githubOwner: 'test-org',
+        githubRepo: 'repo2',
+        githubTokenSecretName: 'test-github-token',
+        serviceAccountName: 'app2-executor',
+      });
+      
+      const template1 = Template.fromStack(stack1);
+      const template2 = Template.fromStack(stack2);
+      
+      // Stack 1 should have app1-executor-role
+      template1.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"app1-executor-role".*'),
+      });
+      
+      // Stack 2 should have app2-executor-role
+      template2.hasResourceProperties('Custom::AWSCDK-EKS-KubernetesResource', {
+        Manifest: Match.stringLikeRegexp('.*"name":"app2-executor-role".*'),
+      });
+    });
+  });
 });

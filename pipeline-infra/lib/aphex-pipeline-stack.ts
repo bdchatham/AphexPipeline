@@ -163,14 +163,36 @@ export interface AphexPipelineStackProps extends cdk.StackProps {
   // ===== Container Images =====
   
   /**
+   * AWS account ID where container images are stored in ECR
+   * Used to construct ECR image URIs: {account}.dkr.ecr.{region}.amazonaws.com/{repository}:{tag}
+   * @default Stack account (this.account)
+   */
+  containerImageAccount?: string;
+  
+  /**
+   * AWS region where container images are stored in ECR
+   * Used to construct ECR image URIs: {account}.dkr.ecr.{region}.amazonaws.com/{repository}:{tag}
+   * @default 'us-east-1'
+   */
+  containerImageRegion?: string;
+  
+  /**
+   * Container image version tag
+   * @default 'v1.0.1'
+   */
+  containerImageVersion?: string;
+  
+  /**
    * Builder container image
-   * @default 'public.ecr.aws/aphex/builder:latest'
+   * If not provided, constructs from convention: {account}.dkr.ecr.{region}.amazonaws.com/arbiter-pipeline-builder:{version}
+   * @default Convention-based ECR URI
    */
   builderImage?: string;
   
   /**
    * Deployer container image
-   * @default 'public.ecr.aws/aphex/deployer:latest'
+   * If not provided, constructs from convention: {account}.dkr.ecr.{region}.amazonaws.com/arbiter-pipeline-deployer:{version}
+   * @default Convention-based ECR URI
    */
   deployerImage?: string;
   
@@ -279,6 +301,15 @@ export class AphexPipelineStack extends cdk.Stack {
     }
 
     // Set defaults
+    const containerImageAccount = props.containerImageAccount || this.account;
+    const containerImageRegion = props.containerImageRegion || 'us-east-1';
+    const containerImageVersion = props.containerImageVersion || 'v1.0.1';
+    
+    // Construct convention-based ECR image URIs
+    const ecrBase = `${containerImageAccount}.dkr.ecr.${containerImageRegion}.amazonaws.com`;
+    const defaultBuilderImage = `${ecrBase}/arbiter-pipeline-builder:${containerImageVersion}`;
+    const defaultDeployerImage = `${ecrBase}/arbiter-pipeline-deployer:${containerImageVersion}`;
+    
     const config = {
       githubBranch: props.githubBranch || 'main',
       argoNamespace: props.argoNamespace || 'argo',
@@ -291,8 +322,8 @@ export class AphexPipelineStack extends cdk.Stack {
       artifactRetentionDays: props.artifactRetentionDays || 90,
       githubTokenSecretK8sName: 'github-access',
       githubWebhookSecretK8sName: `${props.eventSourceName || 'github'}-webhook-secret`,
-      builderImage: props.builderImage || 'public.ecr.aws/aphex/builder:latest',
-      deployerImage: props.deployerImage || 'public.ecr.aws/aphex/deployer:latest',
+      builderImage: props.builderImage || defaultBuilderImage,
+      deployerImage: props.deployerImage || defaultDeployerImage,
     };
 
     // Parse aphex-config.yaml
@@ -421,6 +452,11 @@ export class AphexPipelineStack extends cdk.Stack {
 
     // Store workflow execution role ARN
     this.workflowExecutionRoleArn = workflowServiceAccount.role.roleArn;
+
+    // Create RBAC resources for workflow-executor ServiceAccount
+    // This allows workflows to create WorkflowTaskResults for passing outputs between steps
+    const workflowExecutorRBAC = this.createWorkflowExecutorRBAC(props, config);
+    workflowExecutorRBAC.node.addDependency(workflowServiceAccount);
 
     // Create S3 bucket for build artifacts
     const artifactBucket = new s3.Bucket(this, 'ArtifactBucket', {
@@ -795,6 +831,71 @@ export class AphexPipelineStack extends cdk.Stack {
     ];
     
     return this.cluster.addManifest('SensorRBAC', ...rbacManifests);
+  }
+
+  /**
+   * Create RBAC resources for workflow-executor ServiceAccount
+   * Grants permissions to create WorkflowTaskResults for passing outputs between workflow steps
+   */
+  private createWorkflowExecutorRBAC(
+    props: AphexPipelineStackProps,
+    config: any
+  ): cdk.aws_eks.KubernetesManifest {
+    const roleName = `${config.serviceAccountName}-role`;
+    const roleBindingName = `${config.serviceAccountName}-rolebinding`;
+    
+    // Create Role and RoleBinding for workflow-executor
+    const rbacManifests = [
+      // Role
+      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'Role',
+        metadata: {
+          name: roleName,
+          namespace: config.argoNamespace,
+          labels: {
+            'app.kubernetes.io/name': config.serviceAccountName,
+            'app.kubernetes.io/component': 'workflow-executor',
+            'app.kubernetes.io/managed-by': 'aphex-pipeline',
+            'app.kubernetes.io/instance': config.workflowTemplateName,
+          },
+        },
+        rules: [
+          {
+            apiGroups: ['argoproj.io'],
+            resources: ['workflowtaskresults'],
+            verbs: ['create', 'get', 'list', 'watch', 'update', 'patch', 'delete'],
+          },
+        ],
+      },
+      // RoleBinding
+      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'RoleBinding',
+        metadata: {
+          name: roleBindingName,
+          namespace: config.argoNamespace,
+          labels: {
+            'app.kubernetes.io/name': config.serviceAccountName,
+            'app.kubernetes.io/component': 'workflow-executor',
+            'app.kubernetes.io/managed-by': 'aphex-pipeline',
+            'app.kubernetes.io/instance': config.workflowTemplateName,
+          },
+        },
+        roleRef: {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'Role',
+          name: roleName,
+        },
+        subjects: [{
+          kind: 'ServiceAccount',
+          name: config.serviceAccountName,
+          namespace: config.argoNamespace,
+        }],
+      },
+    ];
+    
+    return this.cluster.addManifest('WorkflowExecutorRBAC', ...rbacManifests);
   }
 
   /**

@@ -48,7 +48,12 @@ describe('Property 9: Stack deployment ordering', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
@@ -91,7 +96,12 @@ describe('Property 9: Stack deployment ordering', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
@@ -143,7 +153,12 @@ describe('Property 9: Stack deployment ordering', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 
@@ -192,7 +207,12 @@ describe('Property 9: Stack deployment ordering', () => {
         const generator = new WorkflowTemplateGenerator(
           config,
           'test-bucket',
-          'test-service-account'
+          'test-service-account',
+          'test-builder-image',
+          'test-deployer-image',
+          'test-role-arn',
+          'test-workflow-template',
+          'argo'
         );
         const workflowTemplate = generator.generate();
 

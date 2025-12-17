@@ -185,9 +185,14 @@ Then configure the webhook in GitHub:
   - `annotations` - Service annotations for cloud provider configuration (default: `{ 'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb' }`)
   - `labels` - Additional service labels (default: `{}`)
 
+**Container Images**:
+- `containerImageAccount` - AWS account ID where container images are stored in ECR (default: stack account)
+- `containerImageRegion` - AWS region where container images are stored in ECR (default: `'us-east-1'`)
+- `containerImageVersion` - Container image version tag (default: `'v1.0.1'`)
+- `builderImage` - Custom builder container image (overrides convention-based URI)
+- `deployerImage` - Custom deployer container image (overrides convention-based URI)
+
 **Advanced**:
-- `builderImage` - Custom builder container image
-- `deployerImage` - Custom deployer container image
 - `configPath` - Path to aphex-config.yaml (default: `'../aphex-config.yaml'`)
 
 ## Webhook Service Configuration
@@ -280,6 +285,60 @@ new AphexPipelineStack(app, 'MyPipeline', {
   },
 });
 ```
+
+## Container Images: Convention-Based ECR URIs
+
+The construct uses a convention-based approach to construct ECR image URIs, making it easy to use images from your own ECR repositories.
+
+### Default Behavior
+
+By default, images are pulled from ECR in the same account as the stack:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  env: { account: '123456789012', region: 'us-east-1' },
+  // ... other props
+  // Uses: 123456789012.dkr.ecr.us-east-1.amazonaws.com/arbiter-pipeline-builder:v1.0.0
+  // Uses: 123456789012.dkr.ecr.us-east-1.amazonaws.com/arbiter-pipeline-deployer:v1.0.0
+});
+```
+
+### Custom ECR Account/Region
+
+Specify a different account or region for container images:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  containerImageAccount: '987654321098',  // Different account
+  containerImageRegion: 'us-west-2',      // Different region
+  containerImageVersion: 'v2.0.0',        // Different version
+  // Uses: 987654321098.dkr.ecr.us-west-2.amazonaws.com/arbiter-pipeline-builder:v2.0.0
+  // Uses: 987654321098.dkr.ecr.us-west-2.amazonaws.com/arbiter-pipeline-deployer:v2.0.0
+});
+```
+
+### Convention
+
+The construct follows this naming convention:
+- Builder: `{account}.dkr.ecr.{region}.amazonaws.com/arbiter-pipeline-builder:{version}`
+- Deployer: `{account}.dkr.ecr.{region}.amazonaws.com/arbiter-pipeline-deployer:{version}`
+
+### Custom Images
+
+Override with fully custom image URIs:
+
+```typescript
+new AphexPipelineStack(app, 'MyPipeline', {
+  // ... other props
+  builderImage: 'my-registry.io/custom-builder:latest',
+  deployerImage: 'my-registry.io/custom-deployer:latest',
+});
+```
+
+### ECR Authentication
+
+The workflow ServiceAccount automatically has ECR pull permissions via IRSA. No additional configuration needed.
 
 ## Security: Per-Pipeline Webhook Secrets
 
